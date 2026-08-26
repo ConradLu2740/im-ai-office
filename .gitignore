@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# local data & secrets
+.env
+*.db
+*.sqlite3
+
+# build artifacts
+desktop/src-tauri/target/
+__pycache__/
+*.pyc
+.DS_Store
