@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: imai-postgres
+    environment:
+      POSTGRES_USER: imai
+      POSTGRES_PASSWORD: imai_secret
+      POSTGRES_DB: imai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./domain/schema.sql:/schema.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    container_name: imai-redis
+    ports:
+      - "6379:6379"
+
+  # OpenIM 单独部署（服务端全家桶较重），通过 Webhook 接入 oim-webhook
+  # 见 README「联调 OpenIM」
+
+  oim-webhook:
+    build: ./services/oim-webhook
+    container_name: imai-oim-webhook
+    environment:
+      REDIS_URL: redis://redis:6379
+      AUTH_TOKEN: ${AUTH_TOKEN}
+    ports:
+      - "8100:8100"
+    depends_on:
+      - redis
+
+  ai-agent:
+    build: ./services/ai-agent
+    container_name: imai-ai-agent
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://imai:imai_secret@postgres:5432/imai
+      LLM_BASE: ${LLM_BASE}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      AUTH_TOKEN: ${AUTH_TOKEN}
+      OPENIM_API: http://host.docker.internal:10002
+      OPENIM_ADMIN_TOKEN: ${OPENIM_ADMIN_TOKEN}
+    ports:
+      - "8200:8200"
+    depends_on:
+      - postgres
+      - redis
+
+  board-api:
+    build: ./services/board-api
+    container_name: imai-board-api
+    environment:
+      DATABASE_URL: postgresql://imai:imai_secret@postgres:5432/imai
+      AUTH_TOKEN: ${AUTH_TOKEN}
+    ports:
+      - "8300:8300"
+    depends_on:
+      - postgres
+
+  reminder:
+    build: ./services/reminder
+    container_name: imai-reminder
+    environment:
+      DATABASE_URL: postgresql://imai:imai_secret@postgres:5432/imai
+      REDIS_URL: redis://redis:6379
+      AUTH_TOKEN: ${AUTH_TOKEN}
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  pgdata:
