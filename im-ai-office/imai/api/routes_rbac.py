@@ -3,8 +3,10 @@
 """RBAC 路由（自旧 app.py 1:1 迁移）：角色 / 审批 / 群通知审批"""
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+from imai.api import deps
 
 from imai.db import get_conn
 from imai.integrations import openim_client
@@ -30,8 +32,11 @@ class NotifyIn(BaseModel):
 
 
 @router.post("/api/role/set")
-def role_set(body: RoleIn):
-    """管理员设置用户角色（member / group_admin）。"""
+def role_set(body: RoleIn, request: Request):
+    """管理员设置用户角色（member / group_admin）。需管理令牌（若启用）。"""
+    denied = deps.check_admin(request)
+    if denied:
+        return denied
     con = get_conn()
     try:
         rbac_svc.set_role(con, body.oim_user_id, body.role)
@@ -61,7 +66,10 @@ def approvals(status: Optional[str] = "pending"):
 
 
 @router.post("/api/approvals/{approval_id}/decide")
-def approval_decide(approval_id: int, body: ApprovalIn):
+def approval_decide(approval_id: int, body: ApprovalIn, request: Request):
+    denied = deps.check_admin(request)
+    if denied:
+        return denied
     con = get_conn()
     try:
         row, detail = rbac_svc.decide_approval(con, approval_id, body.approved, body.decided_by or "group_admin")

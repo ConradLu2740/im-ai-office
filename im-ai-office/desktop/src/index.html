@@ -152,6 +152,7 @@
         <option value="__custom__">自定义…</option>
       </select>
     </div>
+    <input type="password" id="loginPassword" placeholder="访问口令（可选，视服务端配置）" style="margin-top:6px;" />
     <button onclick="doLogin()">登录</button>
     <div class="tip">当前仅支持 OpenIM 已有账号登录（imAdmin 是管理账号，不能登录）</div>
   </div>
@@ -355,8 +356,9 @@ function swapUser() {
 async function doLogin() {
   const user = document.getElementById("loginUser").value.trim();
   if (!user) return alert("请输入用户ID");
+  const password = (document.getElementById("loginPassword") || {}).value || "";
   try {
-    const res = await api("/openim/login", { method: "POST", body: JSON.stringify({ user_id: user }) });
+    const res = await api("/openim/login", { method: "POST", body: JSON.stringify({ user_id: user, password }) });
     if (res.ok) {
       currentUser = user;
       currentToken = res.token;

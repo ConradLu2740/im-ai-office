@@ -10,6 +10,8 @@ import uuid
 
 from fastapi import APIRouter, Request
 
+from imai.api import deps
+
 from imai import config
 from imai.config import OPENIM_ADMIN_TOKEN, OPENIM_API, OPENIM_SECRET
 from imai.db import get_conn
@@ -43,7 +45,10 @@ def _openim_post(path, payload, token=None):
 
 @router.post("/openim/login")
 def openim_login(body: dict):
-    """用户登录：用 userID 换取用户 token。"""
+    """用户登录：口令（若启用）+ userID 换取用户 token。"""
+    denied = deps.check_login_password(body)
+    if denied:
+        return denied
     user_id = body.get("user_id", "").strip()
     if not user_id:
         return {"ok": False, "error": "user_id 不能为空"}
@@ -213,6 +218,9 @@ async def openim_callback(request: Request):
         payload = json.loads(body)
     except json.JSONDecodeError:
         return {"ok": False, "error": "invalid json"}
+    denied = deps.check_callback_token(request)
+    if denied:
+        return denied
     if config.AI_MODE == "async":
         content = extract_text_content(payload.get("content", ""))
         if not content:

@@ -21,8 +21,6 @@ sys.path.insert(0, str(ROOT))
 _TMP_DB_DIR = Path("/tmp/imai_guard_pytest")
 _TMP_DB_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("IMAI_DB", str(_TMP_DB_DIR / "guard.db"))
-os.environ["IMAI_REDIS_URL"] = os.environ.get("IMAI_TEST_REDIS_URL",
-                                              "redis://127.0.0.1:6379/15")
 
 import pytest                                        # noqa: E402
 from fastapi.testclient import TestClient            # noqa: E402
@@ -82,7 +80,9 @@ def fresh_db():
         con.close()
 
     _wipe()
-    bus.make_redis_client(db=REDIS_DB).flushdb()
+    r15 = bus.make_redis_client(db=REDIS_DB)
+    r15.flushdb()
+    bus.ensure_group(r15)          # flushdb 连带删除 consumer group，worker 只在启动时 ensure 一次
     yield
     _wipe()
 

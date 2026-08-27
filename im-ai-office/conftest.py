@@ -39,6 +39,13 @@ from imai.db import get_conn as _get_conn              # noqa: E402
 from imai.db import init_db as _init_db                # noqa: E402
 import app as app_module                               # noqa: E402
 
+# 业务回归测试剥离认证开关（Step4）——必须在上述所有 load_dotenv/import app 之后，
+# 否则 app.py 的二次 load_dotenv 会把已 pop 的键重新注入；
+# 认证行为由 tests/guard_auth 专门场景化验证。
+for _auth_key in ("AUTH_TOKEN", "IMAI_ADMIN_TOKEN", "IMAI_LOGIN_PASSWORD"):
+    os.environ.pop(_auth_key, None)
+import app as app_module                               # noqa: E402
+
 ALL_TABLES = ("task", "alias", "person", "audit", "ai_dm", "message",
               "role", "approval", "term", "grp_meta")
 

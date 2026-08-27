@@ -14,14 +14,9 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[2]           # im-ai-office/
 sys.path.insert(0, str(ROOT))
 
-from dotenv import load_dotenv                       # noqa: E402
-load_dotenv(ROOT / ".env")
-
-# 后端探测在 import imai.db 时冻结，这里在 import 前清掉 IMAI_DB 并指定 PG
-os.environ.pop("IMAI_DB", None)
+# 后端切换由 pg_backend fixture 以 monkeypatch 完成此处的模块全局替换
 PG_URL = os.environ.get("IMAI_TEST_PG_URL",
                         "postgresql://imai:imai_secret@127.0.0.1:5432/imai_test")
-os.environ["DATABASE_URL"] = PG_URL
 
 import pytest                                        # noqa: E402
 from imai import db as imai_db                       # noqa: E402

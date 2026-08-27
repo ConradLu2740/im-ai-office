@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://127.0.0.1:8400 http://localhost:8000 ws://127.0.0.1:8400; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
