@@ -138,6 +138,23 @@ def client_audits(limit=200):
         con.close()
 
 
+def drain_worker(msg_id, timeout=6.0):
+    """等待 worker 把指定 msgId 处理完（event_dedup 出现即处理完）。
+    用例结束前调用，避免 fake_llm 解绑后 worker 用真 LLM 处理残留消息。"""
+    deadline = time.time() + timeout
+    con = _get_conn()
+    try:
+        while time.time() < deadline:
+            c = con.cursor()
+            c.execute("SELECT 1 FROM event_dedup WHERE msg_id=?", (msg_id,))
+            if c.fetchone():
+                return True
+            time.sleep(0.2)
+        return False
+    finally:
+        con.close()
+
+
 def wait_audit(action, contains=None, timeout=8.0):
     deadline = time.time() + timeout
     while time.time() < deadline:

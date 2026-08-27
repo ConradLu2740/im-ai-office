@@ -80,6 +80,17 @@ def simulate_message(body: dict):
     conv_id = body.get("conv_id", "sg_simulated")
     if not text:
         return {"ok": False, "error": "text 不能为空"}
+    # 迭代1（缺陷#3）：确定性 msgId 去重——sync/async 统一，重放不重复建任务
+    from imai.services import bus
+    msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
+    con = get_conn()
+    try:
+        if bus.is_duplicate(con, msg_id):
+            from imai.repos import audit_log
+            audit_log(con, "entry", "ai_dedup_skip", {"msgId": msg_id, "source": "simulate"})
+            return {"ok": True, "dedup": True, "msg_id": msg_id}
+    finally:
+        con.close()
     # 入库（作为别人的消息 is_self=0）
     con = get_conn()
     try:
@@ -89,14 +100,14 @@ def simulate_message(body: dict):
     # async 模式：AI 判定入队异步处理（Spec §2 矩阵）；sync 模式走原同步链路
     from imai import config
     if config.AI_MODE == "async":
-        from imai.services import bus
-        msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
         r = bus.make_redis_client()
         eid = bus.publish_message(r, conv_id, "sim_user", sender, text,
                                   msg_id=msg_id, source="simulate")
+        bus.mark_consumed(get_conn(), msg_id)
         return {"ok": True, "accepted": True, "queued_event": str(eid), "msg_id": msg_id}
-    # AI 识别
-    ai_result = process_message(text, sender)
+    # AI 识别（迭代1 缺陷#4：conv_id 透传，记忆注入覆盖 simulate 路径）
+    ai_result = process_message(text, sender, group_id=conv_id)
+    bus.mark_consumed(get_conn(), msg_id)
     # 歧义时：写 AI 助手会话
     if ai_result.get("action") == "confirm_assignee":
         task = ai_result.get("task", {})
@@ -118,6 +129,17 @@ def sdk_message(body: dict):
     send_id = body.get("send_id", "")
     if not text:
         return {"ok": False, "error": "text 不能为空"}
+    # 迭代1（缺陷#3）：确定性 msgId 去重
+    from imai.services import bus
+    msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
+    con = get_conn()
+    try:
+        if bus.is_duplicate(con, msg_id):
+            from imai.repos import audit_log
+            audit_log(con, "entry", "ai_dedup_skip", {"msgId": msg_id, "source": "sdk"})
+            return {"ok": True, "dedup": True, "msg_id": msg_id}
+    finally:
+        con.close()
     # 入库（收到的消息 is_self=0）
     con = get_conn()
     try:
@@ -127,14 +149,14 @@ def sdk_message(body: dict):
     # async 模式：AI 判定入队（消息本体已同步入库展示）
     from imai import config
     if config.AI_MODE == "async":
-        from imai.services import bus
-        msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
         r = bus.make_redis_client()
         eid = bus.publish_message(r, conv_id, send_id or "sdk_user", sender, text,
                                   msg_id=msg_id, source="sdk")
+        bus.mark_consumed(get_conn(), msg_id)
         return {"ok": True, "accepted": True, "queued_event": str(eid), "msg_id": msg_id}
-    # AI 识别
-    ai_result = process_message(text, sender)
+    # AI 识别（迭代1 缺陷#4：conv_id 透传，记忆注入覆盖 sdk 路径）
+    ai_result = process_message(text, sender, group_id=conv_id)
+    bus.mark_consumed(get_conn(), msg_id)
     # 歧义时：写 AI 助手会话
     if ai_result.get("action") == "confirm_assignee":
         task = ai_result.get("task", {})

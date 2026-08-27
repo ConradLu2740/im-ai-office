@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """G1 · 任务全生命周期（simulate_message → 看板 → 确认/驳回 → 事件/审计）"""
+import json as _j
+
+from imai.config import EVENTS
 from tests.helpers import make_intent
 
 MSG = "这次618复盘我来出物料清单，下周三前"
@@ -22,16 +25,11 @@ def test_g1_1_create_and_structure(client, fake_llm, db):
     assert t["content"] == "出618复盘物料清单"
     assert t["deadline"] == "下周三前"
     # 进程内事件入队（现状：EVENTS，Step2 将换 Redis Streams）
-    assert any(e.get("event") == "task.created" for e in core_events())
+    assert any(e.get("event") == "task.created" for e in list(EVENTS))
     # 消息已入库
     msgs = client.get("/api/messages").json()["messages"]
     assert any(m["content"] == MSG and m["sender_name"] == "测试同事" for m in msgs)
     assert db.query("SELECT COUNT(*) AS n FROM audit WHERE action='task_created'")[0]["n"] == 1
-
-
-def core_events():
-    from imai.config import EVENTS
-    return list(EVENTS)
 
 
 def test_g1_2_tasks_list_visible(client, fake_llm):
@@ -49,13 +47,12 @@ def test_g1_2_tasks_list_visible(client, fake_llm):
         assert k in row, f"缺字段 {k}"
     assert row["status"] == "pending_confirmation"
     assert row["creator"] == "测试同事"
-    # status 过滤参数可用
     only_confirmed = client.get("/api/tasks", params={"status": "confirmed"}).json()["tasks"]
     assert all(t["status"] == "confirmed" for t in only_confirmed)
 
 
 def test_g1_3_confirm_flow(client, fake_llm, db):
-    """G1.3 人审确认 → confirmed + audit + reminder 语义锁定"""
+    """G1.3 人审确认 → confirmed + audit"""
     fake_llm.route(MSG, **make_intent("出618复盘物料清单",
                                       assignee_hint="我", deadline_hint="下周三前", assign_mode="self"))
     tid = client.post("/api/simulate_message",
@@ -64,15 +61,12 @@ def test_g1_3_confirm_flow(client, fake_llm, db):
     r = client.post(f"/api/tasks/{tid}/confirm", json={})
     assert r.status_code == 200 and r.json()["ok"] is True
 
-    row = db.query("SELECT * FROM task WHERE id=?", (tid,))[0]
-    assert row["status"] == "confirmed"
+    assert db.query("SELECT * FROM task WHERE id=?", (tid,))[0]["status"] == "confirmed"
     assert db.query("SELECT COUNT(*) AS n FROM audit WHERE action='confirm'")[0]["n"] == 1
 
 
 def test_g1_4_reject_flow(client, fake_llm, db):
-    """G1.4 驳回 → rejected + audit reject
-    【现状缺陷登记】reject 理由提取正则过宽（core._memorize_reject_signal）：
-    含『不是』等触发词的中性句子会被误提取人名沉淀术语，详见 g1_4b。"""
+    """G1.4 驳回 → rejected + audit reject（无触发词理由不产生误沉淀）"""
     fake_llm.route(MSG, **make_intent("出618复盘物料清单",
                                       assignee_hint="我", deadline_hint="下周三前", assign_mode="self"))
     tid = client.post("/api/simulate_message",
@@ -84,39 +78,38 @@ def test_g1_4_reject_flow(client, fake_llm, db):
     assert db.query("SELECT * FROM task WHERE id=?", (tid,))[0]["status"] == "rejected"
     audits = db.query("SELECT detail FROM audit WHERE action='reject'")
     assert len(audits) == 1
-    import json as _j
     assert _j.loads(audits[0]["detail"])["reason"] == "信息有误，感谢纠正"
-    # 无触发词的理由：不沉淀任何 term
     assert db.query("SELECT COUNT(*) AS n FROM term")[0]["n"] == 0
 
 
-def test_g1_4b_regex_overcapture_current_state(client, fake_llm, db):
-    """【现状缺陷锁定】中性驳回理由『这不是任务』会误提取『任务』为人名并沉淀术语。
-    这是 core._memorize_reject_signal 正则 (?:应该是|是|改为|...)([\u4e00-\u9fa5]{2,4})
-    的过宽捕获——后续修复时应翻转本断言（期望：不产生 人称:任务）。"""
+def test_g1_4b_regex_no_overcapture(client, fake_llm, db):
+    """G1.4b【迭代1 修复验证·原缺陷#1】中性驳回理由『这不是任务』不再误提取人名沉淀。
+    正则已收紧为显式指人触发词；失败即说明正则过宽回归。"""
     fake_llm.route(MSG, **make_intent("出618复盘物料清单",
                                       assignee_hint="我", deadline_hint="下周三前", assign_mode="self"))
     tid = client.post("/api/simulate_message",
                       json={"sender": "测试同事", "text": MSG}).json()["ai"]["task"]["taskId"]
     client.post(f"/api/tasks/{tid}/reject", json={"reason": "这不是任务"})
 
-    terms = db.query("SELECT term, source FROM term")
+    terms = db.query("SELECT term FROM term")
     hit = [t for t in terms if t["term"] == "人称:任务"]
-    assert len(hit) == 1 and hit[0]["source"] == "corrected", \
-        "现状应为误沉智人称:任务；若本断言失败说明正则已收紧，请更新 Spec 与本用例"
+    assert hit == [], "『这不是任务』不应沉淀任何术语；出现说明正则过宽回归"
 
 
-def test_g1_5_duplicate_delivery_current_state(client, fake_llm, db):
-    """G1.5【现状记录·非理想断言】同消息重复投递会产生两张任务。
-    《架构分析报告》问题 D / Step2 幂等化输入证据：现状无 msgId 去重。
-    本用例仅锁定『重复会复制任务』这一现状；若未来实现去重，此断言应同步翻转。"""
+def test_g1_5_duplicate_delivery_deduped(client, fake_llm, db):
+    """G1.5【迭代1 修复验证·原缺陷#3】同消息重放被确定性 msgId 去重拦截（sync 入口）。
+    契约：第二次投递返回 dedup=true，不建第二张任务，不重复写 task_created 审计。
+    async 模式同语义由 guard_async A4 覆盖（去重判定在 worker）。"""
     fake_llm.route(MSG, **make_intent("出618复盘物料清单",
                                       assignee_hint="我", deadline_hint="下周三前", assign_mode="self"))
     payload = {"sender": "测试同事", "text": MSG}
     r1 = client.post("/api/simulate_message", json=payload).json()
     r2 = client.post("/api/simulate_message", json=payload).json()
-    assert r1["ai"]["action"] == r2["ai"]["action"] == "task_created"
+    assert r1["ok"] is True and r1["ai"]["action"] == "task_created"
+    assert r2["ok"] is True and r2.get("dedup") is True, "重放应被去重拦截"
     n = db.query(
         "SELECT COUNT(*) AS n FROM task WHERE content=? AND creator=? AND status='pending_confirmation'",
         ("出618复盘物料清单", "测试同事"))[0]["n"]
-    assert n == 2, "现状应为重复创建两条（去重缺口实证）；若断言失败说明去重已实现，请更新本用例与 Spec"
+    assert n == 1, f"重放后应只有 1 张任务，实得 {n}"
+    created = db.query("SELECT COUNT(*) AS n FROM audit WHERE action='task_created'")[0]["n"]
+    assert created == 1, "不应产生第二份 task_created 审计"

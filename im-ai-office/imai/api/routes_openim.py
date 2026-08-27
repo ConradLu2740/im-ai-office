@@ -193,7 +193,7 @@ def handle_openim_callback(payload: dict):
         con = get_conn()
         try:
             resolved = resolve_assignee_reply(con, sender_nickname, content)
-            if resolved.get("ok") and resolved.get("action") == "assigned":
+            if resolved.get("ok") and resolved.get("action") == "confirmed":
                 # 可选：再私聊发送者告知已确认
                 try:
                     text = f"【IMAI】已确认负责人：{resolved['assignee']}\n任务：{resolved.get('taskId')}"

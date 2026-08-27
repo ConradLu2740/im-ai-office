@@ -11,7 +11,7 @@ import json
 import threading
 from datetime import datetime, timezone
 
-from imai.config import REDIS_URL, DEDUP_WINDOW_SEC
+from imai import config
 
 STREAM = "msg"
 GROUP = "imai-core-worker"
@@ -29,9 +29,12 @@ def now_ms():
 
 
 def make_redis_client(db=None):
-    """构造 Redis 客户端；db 为 None 时用 REDIS_URL 原样（生产 db0）。"""
+    """构造 Redis 客户端；db 为 None 时用 REDIS_URL 原样（生产 db0）。
+
+    运行时读取 config.REDIS_URL（非 import 冻结）：测试 fixture 通过
+    setattr(config, "REDIS_URL", ...) 切换隔离库时，投递/消费/flush 三方保持一致。"""
     import redis
-    url = REDIS_URL
+    url = config.REDIS_URL
     if db is not None:
         base = url.rsplit("/", 1)[0]
         url = f"{base}/{db}"
@@ -87,7 +90,7 @@ def is_duplicate(con, msg_id):
     c = con.cursor()
     c.execute(
         "SELECT 1 FROM event_dedup WHERE msg_id=? "
-        "AND consumed_at > datetime('now', ?)", (msg_id, f"-{DEDUP_WINDOW_SEC} seconds"))
+        "AND consumed_at > datetime('now', ?)", (msg_id, f"-{config.DEDUP_WINDOW_SEC} seconds"))
     return c.fetchone() is not None
 
 
