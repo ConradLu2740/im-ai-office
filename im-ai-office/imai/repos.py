@@ -101,6 +101,29 @@ def latest_pending_assignee_by_dm_taskid(con, sender_id):
     return task
 
 
+# ============ 消息表（本地 message）============
+
+def message_add(con, conv_id, sender_id, sender_name, content, is_self=0,
+                msg_seq=None, client_msg_id=None, content_type=101):
+    """记录一条消息（自己发或收到的）。返回自增 id。"""
+    c = con.cursor()
+    c.execute(
+        "INSERT INTO message(conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type) VALUES(?,?,?,?,?,?,?,?)",
+        (conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type))
+    con.commit()
+    return c.lastrowid
+
+
+def message_list(con, conv_id=None):
+    """取某会话的消息历史，按 id 升序。"""
+    c = con.cursor()
+    if conv_id:
+        c.execute("SELECT * FROM message WHERE conv_id=? ORDER BY id ASC", (conv_id,))
+    else:
+        c.execute("SELECT * FROM message ORDER BY id ASC")
+    return _rows(c)
+
+
 # ============ 审计 ============
 
 def audit_log(con, actor, action, detail=None):

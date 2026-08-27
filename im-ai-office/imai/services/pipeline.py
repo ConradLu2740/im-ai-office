@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""AI 编排管线服务（自 core.py:328-442 1:1 迁移）：意图判定 → 归属判定 → 落库
+
+意图 prompt/schema、归属三分支、歧义落库分支均逐字保留。
+测试锚点：Guard 的 fake_llm monkeypatch 本模块的 llm_chat 绑定。
+"""
+import json
+
+from imai.config import EVENTS
+from imai.integrations.llm_provider import llm_chat
+from imai.repos import (audit_log, distinct_alias_names, find_persons_by_alias,
+                        insert_task)
+
+
+def to_bool(v):
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() == "true"
+
+
+def intent_detect(msg, sys_ctx=""):
+    schema = {
+        "is_task": "boolean", "confidence": "high|medium|low",
+        "content": "string", "assignee_hint": "string|nullable(用'我'表示说话人)",
+        "deadline_hint": "string|nullable", "assign_mode": "assigned|self|third_party|none",
+    }
+    system = (
+        "你是办公群聊里的任务识别助手。只在消息确实安排/认领任务时 is_task=true。"
+        "分清：明确指派(@某人或'你负责')=assigned；主动认领('我来')=self；第三人称指派('让小张跟一下')=third_party；无归属=none。"
+        "不要臆断。输出严格JSON：" + json.dumps(schema, ensure_ascii=False)
+    )
+    if sys_ctx:
+        system += "\n" + sys_ctx
+    raw = llm_chat(system, "判断这条群聊消息是否在安排任务；是则提取内容/负责人/截止：\n消息：" + msg)
+    try:
+        intent = json.loads(raw)
+        # 规范化 LLM 输出：is_task 偶发返回字符串 "true"/"false"，统一转布尔，避免下游 `is True` 断言/前端展示不稳定
+        if isinstance(intent, dict):
+            intent["is_task"] = to_bool(intent.get("is_task"))
+        return intent
+    except Exception:
+        return {"is_task": False, "confidence": "low"}
+
+
+# ============ 归属判定（别名消歧 + 认领模式）============
+def find_by_alias(con, name):
+    return find_persons_by_alias(con, name)
+
+
+def resolve(con, msg, sender="李娜(娜姐)", intent=None):
+    mode = (intent or {}).get("assign_mode", "none")
+    if mode == "self":
+        return {"assignee": sender, "confidence": "high", "candidates": [], "mode": mode, "ambiguous": False}
+    names = distinct_alias_names(con)
+    hits = []
+    for n in names:
+        if n and n in msg:
+            hits.extend(find_by_alias(con, n))
+    seen, uniq = set(), []
+    for h in hits:
+        if h[0] not in seen:
+            seen.add(h[0]); uniq.append(h)
+    if len(uniq) == 0:
+        hint = (intent or {}).get("assignee_hint")
+        return {"assignee": hint or None, "confidence": "low", "candidates": [], "mode": mode, "ambiguous": False}
+    if len(uniq) == 1:
+        return {"assignee": uniq[0][1] + "/" + (uniq[0][2] or ""), "confidence": "high", "candidates": uniq, "mode": mode, "ambiguous": False}
+    labels = [{"person_id": r[0], "label": f"{r[1]}({r[2]})"} for r in uniq]
+    return {"assignee": None, "confidence": "medium", "candidates": uniq, "mode": mode, "ambiguous": True,
+            "ambiguous_labels": labels}
+
+
+# ============ 主流程 ============
+
+def process_message(msg, sender="李娜(娜姐)", group_id=None):
+    """跑完整链路，返回结构化结果。group_id 用于群级上下文注入。
+    【现状缺陷登记】同 msg 重复投递会重复建任务（无去重）；g1_5 锁定实证，
+    Step2 事件化时以 event_dedup/msgId 一并解决。
+    【现状缺陷登记】process_message 每次新建连接未显式 close（历史上即如此）；
+    Step2 重构入口与连接管理时统一治理。"""
+    from imai.db import init_db   # 历史行为：init 兼建表（原 core.init_db 同名同责）
+    con = init_db()
+    sys_ctx = build_sys_ctx_stub(con, group_id) if group_id else ""
+    intent = intent_detect(msg, sys_ctx=sys_ctx)
+    base = {"message": msg, "sender": sender, "intent": intent}
+    if not to_bool(intent.get("is_task")):
+        base["action"] = "skip"  # 非任务，静默
+        return base
+
+    assign = resolve(con, msg, sender, intent)
+    base["assign"] = assign
+
+    if assign.get("ambiguous"):
+        # 有歧义 -> 先落库 pending_assignee，再由 app.py 私聊发送者确认
+        content = intent.get("content") or msg
+        deadline = intent.get("deadline_hint")
+        pending_meta = json.dumps({"candidates": assign.get("ambiguous_labels", [])}, ensure_ascii=False)
+        task_id = insert_task(con, content, sender, None, deadline, "pending_assignee",
+                              intent.get("confidence"), msg, pending_meta=pending_meta)
+        audit_log(con, "ai", "identify_ambiguous",
+                  {"taskId": task_id, "content": content, "candidates": assign.get("ambiguous_labels", [])})
+        base["action"] = "confirm_assignee"
+        base["needs_confirmation"] = True
+        base["task"] = {"taskId": task_id, "content": content, "assignee": None,
+                        "deadline": deadline, "status": "pending_assignee",
+                        "candidates": assign.get("ambiguous_labels", [])}
+        return base
+
+    assignee = assign.get("assignee") or "待指派"
+    content = intent.get("content") or msg
+    deadline = intent.get("deadline_hint")
+
+    task_id = insert_task(con, content, sender, assignee, deadline,
+                          "pending_confirmation", intent.get("confidence"), msg)
+    audit_log(con, "ai", "task_created",
+              {"taskId": task_id, "content": content, "assignee": assignee, "deadline": deadline})
+    # 入事件队列
+    EVENTS.append({"event": "task.created", "taskId": task_id, "assignee": assignee, "deadline": deadline})
+    base["action"] = "task_created"
+    base["task"] = {"taskId": task_id, "content": content, "assignee": assignee,
+                    "deadline": deadline, "status": "pending_confirmation"}
+    return base
+
+
+def build_sys_ctx_stub(con, group_id):
+    """注入上下文构建。原实现在 core.memory 区段——委托 memory 服务保持单一来源。"""
+    from imai.services.memory import build_sys_ctx as _real
+    return _real(con, group_id)

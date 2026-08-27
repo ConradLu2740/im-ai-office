@@ -3,6 +3,9 @@
 """G3 · RBAC 角色读写 / 高风险审批闭环 / 权限矩阵"""
 import json as _j
 
+from imai.db import get_conn
+from imai.services import rbac as rbac_svc
+
 
 def test_g3_1_role_roundtrip(client):
     """G3.1 角色设置与读取往返；非法角色被拒"""
@@ -62,20 +65,20 @@ def test_g3_3b_reject_decision(client, db):
 def test_g3_4_can_do_matrix():
     """G3.4 can_do 矩阵抽查（core 层语义）：member 高风险一律待批，admin 直接放行"""
     import core
-    con = core.get_conn()
+    con = get_conn()
     try:
         member_allows = []
         admin_allows = []
-        ok, why = core.can_do(con, "u1", "assign_notify")       # member（默认）
+        ok, why = rbac_svc.can_do(con, "u1", "assign_notify")       # member（默认）
         member_allows.append((ok, why))
-        ok2, why2 = core.can_do(con, "imAdmin", "assign_notify")
+        ok2, why2 = rbac_svc.can_do(con, "imAdmin", "assign_notify")
         admin_allows.append((ok2, why2))
         assert member_allows == [(False, "require_approval")]
         assert admin_allows == [(True, "admin 允许，直接执行")]
         # 通用读写在两级都允许
         for uid in ("u1", "imAdmin"):
             for act in ("read_group", "write_board"):
-                okx, _ = core.can_do(con, uid, act)
+                okx, _ = rbac_svc.can_do(con, uid, act)
                 assert okx is True
     finally:
         con.close()

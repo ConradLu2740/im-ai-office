@@ -17,8 +17,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent          # im-ai-office/
 sys.path.insert(0, str(ROOT))
 
-# 必须在 import core 之前注入 .env：core 的 LLM_* 常量在 import 时冻结，
-# 生产路径由 app.py 首行 load_dotenv 完成；Eval 层直连真实 LLM 依赖此处时序。
+# 必须在 import imai（进而冻结 LLM_*/DB_FILE 常量）之前注入 .env；
+# 生产路径由 app.py 首行 load_dotenv 完成，Eval 层直连真实 LLM 依赖此处时序。
 try:
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env")
@@ -32,8 +32,11 @@ os.environ["IMAI_DB"] = str(_TMP_DB_DIR / "guard.db")
 import pytest                                    # noqa: E402
 from fastapi.testclient import TestClient        # noqa: E402
 
-import core                                      # noqa: E402
-import app as app_module                         # noqa: E402
+from imai.services import pipeline                     # noqa: E402
+from imai.config import EVENTS                         # noqa: E402
+from imai.db import get_conn as _get_conn              # noqa: E402
+from imai.db import init_db as _init_db                # noqa: E402
+import app as app_module                               # noqa: E402
 
 ALL_TABLES = ("task", "alias", "person", "audit", "ai_dm", "message",
               "role", "approval", "term", "grp_meta")
@@ -41,14 +44,14 @@ ALL_TABLES = ("task", "alias", "person", "audit", "ai_dm", "message",
 
 def wipe_and_seed():
     """清空业务表并恢复 init_db 种子（张伟/张敏/李娜 + 别名）。"""
-    con = core.get_conn()
+    con = _get_conn()
     c = con.cursor()
     for t in ALL_TABLES:
         c.execute(f"DELETE FROM {t}")
     con.commit()
     con.close()
-    core.EVENTS.clear()
-    con = core.init_db()          # person 为空 → 自动补种子
+    EVENTS.clear()
+    con = _init_db()          # person 为空 → 自动补种子
     con.close()
 
 
@@ -101,7 +104,7 @@ def fake_llm(monkeypatch):
                 return json.dumps(merged, ensure_ascii=False)
         return json.dumps({"is_task": False, "confidence": "low"})
 
-    monkeypatch.setattr(core, "llm_chat", _fake)
+    monkeypatch.setattr(pipeline, "llm_chat", _fake)
 
     def route(msg_text, **intent_fields):
         routing[msg_text] = intent_fields
@@ -111,7 +114,7 @@ def fake_llm(monkeypatch):
 
 class DBHelper:
     def query(self, sql, params=()):
-        con = core.get_conn()
+        con = _get_conn()
         try:
             c = con.cursor()
             c.execute(sql, params)
@@ -121,7 +124,7 @@ class DBHelper:
             con.close()
 
     def exec(self, sql, params=()):
-        con = core.get_conn()
+        con = _get_conn()
         try:
             con.execute(sql, params)
             con.commit()
