@@ -24,13 +24,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from imai.api import routes_memory, routes_misc, routes_openim, routes_rbac, routes_tasks
+    from imai.api import (routes_events, routes_memory, routes_misc,
+                          routes_openim, routes_rbac, routes_tasks)
 
     app.include_router(routes_tasks.router)
     app.include_router(routes_openim.router)
     app.include_router(routes_rbac.router)
     app.include_router(routes_memory.router)
     app.include_router(routes_misc.router)
+    app.include_router(routes_events.router)
 
     @app.get("/", response_class=HTMLResponse)
     def index():
@@ -39,7 +41,15 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _on_startup():
+        from imai import config as _cfg
         routes_openim.gateway_auto_login()
+        # Step2：async 模式启动 AI worker 内嵌线程；Redis 不可达自动降级 sync（Spec §5）
+        if _cfg.AI_MODE == "async":
+            from imai import worker
+            if worker.start_worker_thread():
+                print(f"[app] AI worker 已启动 (mode={_cfg.AI_MODE})")
+            else:
+                print("[app] AI worker 启动失败，本次会话降级为 sync 模式")
 
     # 启动时初始化数据库（原 app.py 模块级行为保留）
     from imai.db import get_conn as _get_conn, init_db as _init_db
