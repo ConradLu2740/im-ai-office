@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""数据访问层：集中高频/复用查询（SQL 语义与 core.py 1:1）
+
+约定：
+- 只放被多模块复用或结构复杂的查询；简单单行写允许留在服务层原样直写
+- 全部函数接收 con（连接由调用方管理），不自行开关连接
+"""
+from imai.db import _rows
+
+
+# ============ 人 / 别名 ============
+
+def find_persons_by_alias(con, name):
+    """别名 → 候选人列表 [(id, real_name, flower_name)]"""
+    c = con.cursor()
+    c.execute("SELECT p.id, p.real_name, p.flower_name FROM alias a JOIN person p ON p.id=a.person_id WHERE a.name=?", (name,))
+    return c.fetchall()
+
+
+def distinct_alias_names(con):
+    c = con.cursor()
+    c.execute("SELECT DISTINCT name FROM alias")
+    return [r[0] for r in c.fetchall()]
+
+
+def alias_label_rows(con):
+    """DISTINCT 别名-正名-花名 三元组（注入与溯源共用）"""
+    c = con.cursor()
+    c.execute("SELECT DISTINCT a.name, p.real_name, p.flower_name FROM alias a JOIN person p ON p.id=a.person_id")
+    return c.fetchall()
+
+
+def insert_alias_if_absent(con, person_id, name) -> bool:
+    """幂等插入别名；返回是否实际新增。"""
+    c = con.cursor()
+    c.execute("SELECT 1 FROM alias WHERE person_id=? AND name=?", (person_id, name))
+    if not c.fetchone():
+        c.execute("INSERT INTO alias(person_id, name) VALUES(?,?)", (person_id, name))
+        con.commit()
+        return True
+    return False
+
+
+# ============ 任务 ============
+
+def insert_task(con, content, creator, assignee, deadline, status, confidence,
+                source_msg, pending_meta=None):
+    """插入任务，返回自增 id。pending_meta 由调用方保证 JSON 字符串。"""
+    if pending_meta is not None:
+        c = con.cursor()
+        c.execute(
+            "INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg,pending_meta)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (content, creator, assignee, deadline, status, confidence, source_msg, pending_meta))
+    else:
+        c = con.cursor()
+        c.execute(
+            "INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (content, creator, assignee, deadline, status, confidence, source_msg))
+    con.commit()
+    return c.lastrowid
+
+
+def get_task_dict(con, task_id):
+    c = con.cursor()
+    c.execute("SELECT * FROM task WHERE id=?", (task_id,))
+    row = c.fetchone()
+    return dict(row) if row else None
+
+
+def list_task_dicts(con, status=None):
+    c = con.cursor()
+    if status:
+        c.execute("SELECT * FROM task WHERE status=? ORDER BY id DESC", (status,))
+    else:
+        c.execute("SELECT * FROM task ORDER BY id DESC")
+    return _rows(c)
+
+
+def latest_pending_assignee_for_creator(con, creator):
+    """取该发送者最近一条 pending_assignee 任务。"""
+    c = con.cursor()
+    c.execute("SELECT * FROM task WHERE creator=? AND status='pending_assignee' ORDER BY id DESC LIMIT 1", (creator,))
+    row = c.fetchone()
+    return dict(row) if row else None
+
+
+def latest_pending_assignee_by_dm_taskid(con, sender_id):
+    """从 ai_dm 最近带 task_id 的记录回查 pending_assignee 任务。"""
+    task = None
+    c = con.cursor()
+    c.execute("SELECT * FROM ai_dm WHERE sender_id=? AND task_id IS NOT NULL ORDER BY id DESC LIMIT 1", (sender_id,))
+    row = c.fetchone()
+    if row:
+        tid = row["task_id"]
+        c.execute("SELECT * FROM task WHERE id=? AND status='pending_assignee' ORDER BY id DESC LIMIT 1", (tid,))
+        t2 = c.fetchone()
+        task = dict(t2) if t2 else None
+    return task
+
+
+# ============ 审计 ============
+
+def audit_log(con, actor, action, detail=None):
+    """审计：所有关键 AI/人工动作留痕。actor: ai | user:<id> | system。detail 序列化为 JSON 字符串。"""
+    import json
+    c = con.cursor()
+    c.execute("INSERT INTO audit(actor,action,detail) VALUES(?,?,?)",
+              (actor, action, json.dumps(detail, ensure_ascii=False) if detail is not None else None))
+    con.commit()
+
+
+def audit_recent(con, limit=30):
+    c = con.cursor()
+    c.execute("SELECT actor,action,detail,ts FROM audit ORDER BY rowid DESC LIMIT ?", (limit,))
+    return _rows(c)
+
+
+# ============ 术语 / 团队记忆 ============
+
+def list_term_dicts(con):
+    c = con.cursor()
+    c.execute("SELECT * FROM term ORDER BY id DESC")
+    return _rows(c)
