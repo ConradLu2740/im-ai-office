@@ -10,10 +10,14 @@ import uuid
 
 from fastapi import APIRouter, Request
 
+from imai import config
 from imai.config import OPENIM_ADMIN_TOKEN, OPENIM_API, OPENIM_SECRET
 from imai.db import get_conn
 from imai.integrations import openim_client
 from imai.repos import message_add
+from imai.services import bus
+from imai.services.actions import build_confirm_text as _build_confirm_text
+from imai.services.actions import execute_ai_actions
 from imai.services.ai_dm import ai_dm_send, resolve_assignee_reply
 from imai.services.memory import memory_proofs
 from imai.services.pipeline import process_message
@@ -141,22 +145,6 @@ def extract_text_content(raw):
     return str(raw or "")
 
 
-def build_confirm_text(task):
-    """构建私聊确认消息文本。带溯源标注（M4-S6）。"""
-    candidates = task.get("candidates", [])
-    lines = ["【IMAI 任务确认】"]
-    lines.append(f"你刚安排的任务：{task['content']}")
-    lines.append("检测到多个可能的负责人：")
-    for i, c in enumerate(candidates, 1):
-        lines.append(f"{i}. {c['label']}")
-    lines.append("请回复数字选择负责人，或回复\"取消\"跳过。")
-    proofs = task.get("proofs") or []
-    if proofs:
-        lines.append("")
-        lines.append("（依据：" + "；".join(p["term"] + "=" + (p.get("meaning") or "") for p in proofs[:3]) + "）")
-    return "\n".join(lines)
-
-
 def handle_openim_callback(payload: dict):
     """处理 OpenIM afterSendGroupMsg / afterSendSingleMsg 回调。"""
     # 支持多种字段名
@@ -179,25 +167,14 @@ def handle_openim_callback(payload: dict):
     if grp_id:
         result = process_message(content, sender_nickname, group_id=grp_id)
         if result.get("action") == "confirm_assignee":
-            task = result.get("task", {})
-            # M4-S6 溯源：命中团队记忆则标注依据
-            con_proof = get_conn()
-            try:
-                task["proofs"] = memory_proofs(con_proof, task.get("content") or content)
-            finally:
-                con_proof.close()
-            # 私聊发送者确认负责人：写入 AI 助手会话 + 调 OpenIM 私聊发送
-            text = build_confirm_text(task)
-            con = get_conn()
-            try:
-                ai_dm_send(con, sender_id, text, task_id=task.get("taskId"), direction="out")
-            finally:
-                con.close()
-            try:
-                openim_client.send_private_confirm(grp_id, sender_id, text)
-            except Exception as e:
-                return {"ok": False, "handled": False, "action": "confirm_assignee", "error": str(e)}
-            return {"ok": True, "handled": True, "action": "confirm_assignee_sent", "taskId": task.get("taskId")}
+            # 副作用链收敛至 services.actions（溯源标注/ai_dm/OpenIM 私聊/SSE 播报）
+            executed = execute_ai_actions(result, sender_id=sender_id, group_id=grp_id,
+                                          source="callback_sync")
+            if not executed.get("ok", True):
+                return {"ok": False, "handled": False, "action": "confirm_assignee",
+                        "error": executed.get("error")}
+            return {"ok": True, "handled": True, "action": "confirm_assignee_sent",
+                    "taskId": executed.get("taskId")}
         elif result.get("action") == "task_created":
             return {"ok": True, "handled": True, "action": "task_created", "taskId": result["task"]["taskId"]}
         else:
@@ -227,12 +204,29 @@ def handle_openim_callback(payload: dict):
 
 @router.post("/callback")
 async def openim_callback(request: Request):
-    """OpenIM 消息回调入口。"""
+    """OpenIM 消息回调入口。
+
+    sync（默认）：同步处理（Step1 行为）；async：校验后入队立即受理返回。
+    """
     body = await request.body()
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
         return {"ok": False, "error": "invalid json"}
+    if config.AI_MODE == "async":
+        content = extract_text_content(payload.get("content", ""))
+        if not content:
+            return {"ok": True, "handled": False, "reason": "empty_content"}
+        grp_id = payload.get("groupID") or payload.get("group_id") or ""
+        r = bus.make_redis_client()
+        eid = bus.publish_message(
+            r, grp_id,
+            payload.get("sendID") or payload.get("send_id") or "",
+            payload.get("senderNickname") or payload.get("sender_nickname") or "",
+            content,
+            msg_id=payload.get("msgID") or payload.get("msgId") or payload.get("msg_id"),
+            source="callback")
+        return {"ok": True, "accepted": True, "queued_event": str(eid)}
     return handle_openim_callback(payload)
 
 

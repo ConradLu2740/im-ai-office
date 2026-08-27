@@ -11,6 +11,7 @@ from imai.config import EVENTS
 from imai.db import get_conn, init_db
 from imai.integrations import openim_client
 from imai.repos import message_add, message_list
+from imai.services.actions import build_confirm_text as _build_confirm_text
 from imai.services.ai_dm import ai_dm_send, resolve_task_by_choice
 from imai.services.pipeline import process_message
 from imai.services.tasks import confirm_task as _confirm_task, reject_task as _reject_task
@@ -43,23 +44,6 @@ def _extract_text_content(raw):
     if isinstance(raw, dict):
         return str(raw.get("content") or raw.get("text") or "")
     return str(raw or "")
-
-
-def _build_confirm_text(task):
-    """构建私聊确认消息文本。带溯源标注（M4-S6）。"""
-    candidates = task.get("candidates", [])
-    lines = ["【IMAI 任务确认】"]
-    lines.append(f"你刚安排的任务：{task['content']}")
-    lines.append("检测到多个可能的负责人：")
-    for i, c in enumerate(candidates, 1):
-        lines.append(f"{i}. {c['label']}")
-    lines.append("请回复数字选择负责人，或回复\"取消\"跳过。")
-    # M4-S6 溯源标注：任务命中团队记忆则附依据
-    proofs = task.get("proofs") or []
-    if proofs:
-        lines.append("")
-        lines.append("（依据：" + "；".join(p["term"] + "=" + (p.get("meaning") or "") for p in proofs[:3]) + "）")
-    return "\n".join(lines)
 
 
 @router.post("/api/chat")
@@ -102,6 +86,15 @@ def simulate_message(body: dict):
         message_add(con, conv_id, "sim_user", sender, text, is_self=0)
     finally:
         con.close()
+    # async 模式：AI 判定入队异步处理（Spec §2 矩阵）；sync 模式走原同步链路
+    from imai import config
+    if config.AI_MODE == "async":
+        from imai.services import bus
+        msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
+        r = bus.make_redis_client()
+        eid = bus.publish_message(r, conv_id, "sim_user", sender, text,
+                                  msg_id=msg_id, source="simulate")
+        return {"ok": True, "accepted": True, "queued_event": str(eid), "msg_id": msg_id}
     # AI 识别
     ai_result = process_message(text, sender)
     # 歧义时：写 AI 助手会话
@@ -131,6 +124,15 @@ def sdk_message(body: dict):
         message_add(con, conv_id, send_id or "sdk_user", sender, text, is_self=0)
     finally:
         con.close()
+    # async 模式：AI 判定入队（消息本体已同步入库展示）
+    from imai import config
+    if config.AI_MODE == "async":
+        from imai.services import bus
+        msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
+        r = bus.make_redis_client()
+        eid = bus.publish_message(r, conv_id, send_id or "sdk_user", sender, text,
+                                  msg_id=msg_id, source="sdk")
+        return {"ok": True, "accepted": True, "queued_event": str(eid), "msg_id": msg_id}
     # AI 识别
     ai_result = process_message(text, sender)
     # 歧义时：写 AI 助手会话
