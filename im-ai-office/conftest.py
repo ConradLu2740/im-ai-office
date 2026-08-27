@@ -47,7 +47,7 @@ for _auth_key in ("AUTH_TOKEN", "IMAI_ADMIN_TOKEN", "IMAI_LOGIN_PASSWORD"):
 import app as app_module                               # noqa: E402
 
 ALL_TABLES = ("task", "alias", "person", "audit", "ai_dm", "message",
-              "role", "approval", "term", "grp_meta")
+              "role", "approval", "term", "grp_meta", "event_dedup")
 
 
 def wipe_and_seed():

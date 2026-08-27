@@ -3,8 +3,7 @@
 """M4 团队记忆服务（自 core.py:166-308 + 473-494 1:1 迁移）
 
 术语/群简介维护、上下文注入(build_sys_ctx)、溯源(memory_proofs)、修正信号沉淀。
-【现状缺陷登记】_memorize_reject_signal 的正则过宽：含『不是/是』等触发词的中性
-句子会被误提取人名沉淀 term，由 tests/guard g1_4b 锁定现状；收紧正则时须同步翻转该用例。
+【迭代1 已修复】正则已收紧（去裸『是』触发词）；g1_4b 已翻转为回归哨兵。
 """
 import re
 from datetime import datetime
@@ -151,7 +150,8 @@ def _memorize_reject_signal(con, reason, task_id):
     【现状缺陷】正则过宽见模块 docstring；g1_4b 哨兵用例锁定。"""
     if not reason:
         return
-    m = re.search(r"(?:应该是|是|改为|正确.?(?:负责人|人)?.?:?\s*)([\u4e00-\u9fa5]{2,4})", reason)
+    # 迭代1 修复（缺陷#1）：移除裸『是』触发词——『这不是任务』等中性句曾被误提取人名
+    m = re.search(r"(?:应该是|改为|负责人应该是|正确负责人[:：]?\s*|负责人是)([\u4e00-\u9fa5]{2,4})", reason)
     if not m:
         return
     correct_name = m.group(1)

@@ -4,7 +4,7 @@
 import threading
 import time
 
-from tests.guard_async.conftest import wait_audit, wait_task
+from tests.guard_async.conftest import drain_worker, wait_audit, wait_task
 
 MSG_SELF = "618复盘物料清单我来出，周五前"
 MSG_AMBIG = "让小张跟一下供应商比价"
@@ -40,6 +40,7 @@ def test_accept_sdk_and_callback(async_client):
         "senderNickname": "李娜(娜姐)", "contentType": "101", "content": MSG_AMBIG,
     }).json()
     assert d2["ok"] is True and d2["accepted"] is True
+    assert drain_worker("cb-asynctest-1"), "worker 应排空该回调消息"
     assert "handled" not in d2                          # 不再同步处理语义
 
 
@@ -70,8 +71,8 @@ def test_replay_within_window_deduped(async_client, fake_llm):
     tasks = async_client.get("/api/tasks").json()["tasks"]
     n = len([t for t in tasks if "618复盘物料清单" in (t.get("content") or "")])
     assert n == 1, f"async 下重放不应重复建任务，实得 {n}"
-    skips = [a for a in wait_audit("ai_dedup_skip", timeout=3)]
-    assert skips, "应存在 ai_dedup_skip 审计证据"
+    skip_hit = wait_audit("ai_dedup_skip", timeout=5)
+    assert skip_hit, "应存在 ai_dedup_skip 审计证据"
 
 
 def test_ambiguous_flow_via_worker(async_client, fake_llm):

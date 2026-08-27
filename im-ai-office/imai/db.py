@@ -144,6 +144,18 @@ class PgConnection:
 
 # ============ 统一入口 ============
 
+def _sqlite_migrate(db_file):
+    """SQLite 轻量迁移：Step3 双列 deadline_at + Step2 event_dedup 已在建表内。"""
+    con = sqlite3.connect(db_file)
+    c = con.cursor()
+    c.execute("PRAGMA table_info(task)")
+    cols = {r[1] for r in c.fetchall()}
+    if "deadline_at" not in cols:
+        c.execute("ALTER TABLE task ADD COLUMN deadline_at TEXT")
+    con.commit()
+    con.close()
+
+
 def get_conn():
     """返回原生 sqlite3 连接或 PgConnection 包装（行均为 dict 可键访问）。"""
     if BACKEND == "postgres":
@@ -154,11 +166,11 @@ def get_conn():
 
 
 def init_db(db_file=None):
-    """建表 + 种子。SQLite：原 1:1 逻辑；PG：执行 POSTGRES_SCHEMA。"""
+    """建表 + 种子。SQLite：原 1:1 逻辑 + 轻量迁移（deadline_at 补列）；PG：POSTGRES_SCHEMA。"""
     if BACKEND == "postgres":
         con = PgConnection(_pg_connect(db_file or DATABASE_URL))
         cur = con.cursor()
-        for stmt in [s.strip() for s in POSTGRES_SCHEMA.split(";") if s.strip()]:
+        for stmt in [st.strip() for st in POSTGRES_SCHEMA.split(";") if st.strip()]:
             cur.execute(stmt)
         cur.execute("SELECT COUNT(*) AS n FROM person")
         if cur.fetchone()["n"] == 0:
@@ -169,14 +181,15 @@ def init_db(db_file=None):
         con.close()
         return get_conn()
 
+    # ---- SQLite 分支 ----
     con = sqlite3.connect(db_file or SQLITE_FILE)
     c = con.cursor()
     c.executescript("""
     CREATE TABLE IF NOT EXISTS person(id INTEGER PRIMARY KEY, real_name TEXT, flower_name TEXT, title TEXT, group_id INTEGER);
     CREATE TABLE IF NOT EXISTS alias(person_id INTEGER, name TEXT);
     CREATE TABLE IF NOT EXISTS task(id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, creator TEXT,
-                      assignee TEXT, deadline TEXT, status TEXT, confidence TEXT, source_msg TEXT,
-                      pending_meta TEXT,
+                      assignee TEXT, deadline TEXT, deadline_at TEXT,
+                      status TEXT, confidence TEXT, source_msg TEXT, pending_meta TEXT,
                       created_at TEXT DEFAULT (datetime('now')), updated_at TEXT);
     CREATE TABLE IF NOT EXISTS audit(actor TEXT, action TEXT, detail TEXT, ts TEXT DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS ai_dm(id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id TEXT, direction TEXT, content TEXT, task_id INTEGER, read_flag INTEGER DEFAULT 0, ts TEXT DEFAULT (datetime('now')));
