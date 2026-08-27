@@ -6,29 +6,29 @@
 - 只放被多模块复用或结构复杂的查询；简单单行写允许留在服务层原样直写
 - 全部函数接收 con（连接由调用方管理），不自行开关连接
 """
-from imai.db import _rows
+from imai.db import _rows, take_id
 
 
 # ============ 人 / 别名 ============
 
 def find_persons_by_alias(con, name):
-    """别名 → 候选人列表 [(id, real_name, flower_name)]"""
+    """别名 → 候选人列表 [dict(id, real_name, flower_name)]（双方言统一 dict 行）"""
     c = con.cursor()
     c.execute("SELECT p.id, p.real_name, p.flower_name FROM alias a JOIN person p ON p.id=a.person_id WHERE a.name=?", (name,))
-    return c.fetchall()
+    return _rows(c)
 
 
 def distinct_alias_names(con):
     c = con.cursor()
     c.execute("SELECT DISTINCT name FROM alias")
-    return [r[0] for r in c.fetchall()]
+    return [r["name"] for r in _rows(c)]
 
 
 def alias_label_rows(con):
-    """DISTINCT 别名-正名-花名 三元组（注入与溯源共用）"""
+    """DISTINCT 别名-正名-花名（注入与溯源共用），dict 行。"""
     c = con.cursor()
     c.execute("SELECT DISTINCT a.name, p.real_name, p.flower_name FROM alias a JOIN person p ON p.id=a.person_id")
-    return c.fetchall()
+    return _rows(c)
 
 
 def insert_alias_if_absent(con, person_id, name) -> bool:
@@ -51,16 +51,17 @@ def insert_task(con, content, creator, assignee, deadline, status, confidence,
         c = con.cursor()
         c.execute(
             "INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg,pending_meta)"
-            " VALUES(?,?,?,?,?,?,?,?)",
+            " VALUES(?,?,?,?,?,?,?,?) RETURNING id",
             (content, creator, assignee, deadline, status, confidence, source_msg, pending_meta))
     else:
         c = con.cursor()
         c.execute(
             "INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg)"
-            " VALUES(?,?,?,?,?,?,?)",
+            " VALUES(?,?,?,?,?,?,?) RETURNING id",
             (content, creator, assignee, deadline, status, confidence, source_msg))
+    tid = take_id(c)
     con.commit()
-    return c.lastrowid
+    return tid
 
 
 def get_task_dict(con, task_id):
@@ -108,10 +109,11 @@ def message_add(con, conv_id, sender_id, sender_name, content, is_self=0,
     """记录一条消息（自己发或收到的）。返回自增 id。"""
     c = con.cursor()
     c.execute(
-        "INSERT INTO message(conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type) VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO message(conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type) VALUES(?,?,?,?,?,?,?,?) RETURNING id",
         (conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type))
+    mid = take_id(c)
     con.commit()
-    return c.lastrowid
+    return mid
 
 
 def message_list(con, conv_id=None):
@@ -137,7 +139,12 @@ def audit_log(con, actor, action, detail=None):
 
 def audit_recent(con, limit=30):
     c = con.cursor()
-    c.execute("SELECT actor,action,detail,ts FROM audit ORDER BY rowid DESC LIMIT ?", (limit,))
+    # PG 无 rowid：用自增 id；SQLite 保留 rowid
+    from imai.db import BACKEND
+    if BACKEND == "postgres":
+        c.execute("SELECT actor,action,detail,ts FROM audit ORDER BY id DESC LIMIT %s", (limit,))
+    else:
+        c.execute("SELECT actor,action,detail,ts FROM audit ORDER BY rowid DESC LIMIT ?", (limit,))
     return _rows(c)
 
 

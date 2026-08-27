@@ -4,6 +4,7 @@
 import json
 
 from imai.config import HIGH_RISK_ACTIONS
+from imai.db import take_id
 from imai.repos import audit_log
 
 
@@ -14,7 +15,7 @@ def get_role(con, oim_user_id):
         return "group_admin"
     c.execute("SELECT role FROM role WHERE oim_user_id=?", (oim_user_id,))
     row = c.fetchone()
-    return row[0] if row else "member"
+    return (row["role"] if row else "member")
 
 
 def set_role(con, oim_user_id, role):
@@ -48,10 +49,10 @@ def can_do(con, oim_user_id, action, role=None):
 def require_approval(con, actor, action, detail=None):
     """插入一条待审批准。返回 approval id。AI 不直接执行高风险动作，只落审批。"""
     c = con.cursor()
-    c.execute("INSERT INTO approval(actor,action,detail,status) VALUES(?,?,?,'pending')",
+    c.execute("INSERT INTO approval(actor,action,detail,status) VALUES(?,?,?,'pending') RETURNING id",
               (actor, action, json.dumps(detail, ensure_ascii=False) if detail is not None else None))
+    _id = take_id(c)
     con.commit()
-    _id = c.lastrowid
     audit_log(con, actor, "approval_pending", {"approvalId": _id, "action": action, "detail": detail})
     return _id
 

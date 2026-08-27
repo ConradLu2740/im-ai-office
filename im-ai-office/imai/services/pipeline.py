@@ -59,14 +59,15 @@ def resolve(con, msg, sender="李娜(娜姐)", intent=None):
             hits.extend(find_by_alias(con, n))
     seen, uniq = set(), []
     for h in hits:
-        if h[0] not in seen:
-            seen.add(h[0]); uniq.append(h)
+        if h["id"] not in seen:
+            seen.add(h["id"]); uniq.append(h)
     if len(uniq) == 0:
         hint = (intent or {}).get("assignee_hint")
         return {"assignee": hint or None, "confidence": "low", "candidates": [], "mode": mode, "ambiguous": False}
     if len(uniq) == 1:
-        return {"assignee": uniq[0][1] + "/" + (uniq[0][2] or ""), "confidence": "high", "candidates": uniq, "mode": mode, "ambiguous": False}
-    labels = [{"person_id": r[0], "label": f"{r[1]}({r[2]})"} for r in uniq]
+        return {"assignee": uniq[0]["real_name"] + "/" + (uniq[0]["flower_name"] or ""),
+                "confidence": "high", "candidates": uniq, "mode": mode, "ambiguous": False}
+    labels = [{"person_id": r["id"], "label": f"{r['real_name']}({r['flower_name']})"} for r in uniq]
     return {"assignee": None, "confidence": "medium", "candidates": uniq, "mode": mode, "ambiguous": True,
             "ambiguous_labels": labels}
 

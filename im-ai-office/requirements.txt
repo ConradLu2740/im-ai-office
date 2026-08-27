@@ -5,3 +5,4 @@ python-dotenv>=1.0.0
 pytest>=7.0
 httpx>=0.24
 redis>=5
+psycopg2-binary>=2.9
