@@ -26,13 +26,14 @@ def test_g5_1_daily_summary_counts_unresolved(client, db):
 
 def test_g5_2_ai_dm_unread_cycle(client, db):
     """G5.2 AI DM：in 方向未读 → 列表未读数一致 → 标记已读归零"""
-    import core
-    con = core.get_conn()
+    from imai.db import get_conn as _gconn
+    from imai.services.ai_dm import ai_dm_send
+    con = _gconn()
     try:
-        core.ai_dm_send(con, "user001", "任务提醒 A", direction="in")
-        core.ai_dm_send(con, "user001", "任务提醒 B", direction="in")
-        core.ai_dm_send(con, "user001", "AI 出站不占未读", direction="out")
-        core.ai_dm_send(con, "user002", "别人的消息", direction="in")
+        ai_dm_send(con, "user001", "任务提醒 A", direction="in")
+        ai_dm_send(con, "user001", "任务提醒 B", direction="in")
+        ai_dm_send(con, "user001", "AI 出站不占未读", direction="out")
+        ai_dm_send(con, "user002", "别人的消息", direction="in")
     finally:
         con.close()
 

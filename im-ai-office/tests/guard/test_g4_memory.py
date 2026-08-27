@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """G4 · 团队记忆：术语/群简介维护、上下文注入、溯源、修正信号沉淀"""
-import core
+from imai.db import get_conn as _gconn
+from imai.services import memory as memory_svc
+from imai.services.pipeline import process_message
 from tests.helpers import make_intent
 
 
@@ -27,7 +29,7 @@ def test_g4_2_context_injection(client, fake_llm, db):
 
     msg = "这条要用红字版发出去"
     fake_llm.route(msg, **make_intent(is_task=False))
-    core.process_message(msg, "李娜(娜姐)", group_id="sg_001")
+    process_message(msg, "李娜(娜姐)", group_id="sg_001")
 
     assert fake_llm.calls, "LLM 应至少被调用一次"
     system = fake_llm.calls[-1]["system"]
@@ -40,10 +42,8 @@ def test_g4_2_context_injection(client, fake_llm, db):
 
 def test_g4_3_memory_proofs_traceability(client, db):
     """G4.3 溯源：文本同时命中术语与别名 → 两类依据并列返回"""
-    con = core.get_conn()
-    con.close()
-    core.add_term(core.get_conn(), "红字版", "红色修订版")
-    proofs = core.memory_proofs(core.get_conn(), "这个要用红字版发，找娜姐就行")
+    memory_svc.add_term(_gconn(), "红字版", "红色修订版")
+    proofs = memory_svc.memory_proofs(_gconn(), "这个要用红字版发，找娜姐就行")
     kinds = {(p["type"], p["term"]) for p in proofs}
     assert ("term", "红字版") in kinds
     assert ("person", "娜姐") in kinds
