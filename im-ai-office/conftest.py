@@ -32,6 +32,7 @@ os.environ["IMAI_DB"] = str(_TMP_DB_DIR / "guard.db")
 import pytest                                    # noqa: E402
 from fastapi.testclient import TestClient        # noqa: E402
 
+from imai.integrations import openim_client as oim_client_mod   # noqa: E402
 from imai.services import pipeline                     # noqa: E402
 from imai.config import EVENTS                         # noqa: E402
 from imai.db import get_conn as _get_conn              # noqa: E402
@@ -68,8 +69,8 @@ def client():
         sent_private.append({"group_id": group_id, "user_id": user_id, "text": text})
         return {"errCode": 0}
 
-    app_module.openim_client.send_group_notice = _fake_notice
-    app_module.openim_client.send_private_confirm = _fake_private
+    oim_client_mod.send_group_notice = _fake_notice
+    oim_client_mod.send_private_confirm = _fake_private
     holder = SimpleNamespace(sent_group=sent_group, sent_private=sent_private)
     with TestClient(app_module.app) as c:
         c.openim_sends = holder

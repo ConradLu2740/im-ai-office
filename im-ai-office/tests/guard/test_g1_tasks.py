@@ -30,8 +30,8 @@ def test_g1_1_create_and_structure(client, fake_llm, db):
 
 
 def core_events():
-    import core
-    return list(core.EVENTS)
+    from imai.config import EVENTS
+    return list(EVENTS)
 
 
 def test_g1_2_tasks_list_visible(client, fake_llm):
