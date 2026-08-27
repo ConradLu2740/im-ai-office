@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""OpenIM 回写客户端：AI 主动发消息到群/私聊（确认卡、提醒、消歧确认）。
+"""OpenIM 回写客户端（自根目录 openim_client.py 1:1 迁移，收编唯一实现）。
 
 OpenIM 发消息 REST API：POST {API_ADDRESS}/msg/send_msg
 - 群聊：sessionType=3，带 groupID

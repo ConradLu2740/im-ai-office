@@ -63,8 +63,7 @@ def test_g3_3b_reject_decision(client, db):
 
 
 def test_g3_4_can_do_matrix():
-    """G3.4 can_do 矩阵抽查（core 层语义）：member 高风险一律待批，admin 直接放行"""
-    import core
+    """G3.4 can_do 矩阵抽查（服务层语义）：member 高风险一律待批，admin 直接放行"""
     con = get_conn()
     try:
         member_allows = []
