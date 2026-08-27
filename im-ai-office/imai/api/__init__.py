@@ -14,11 +14,12 @@ INDEX = ROOT / "index.html"
 
 def create_app() -> FastAPI:
     """组装应用：中间件、路由、启动任务。"""
+    from imai.api import deps
     app = FastAPI(title="对话式 AI 办公 · MVP")
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=deps.allowed_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

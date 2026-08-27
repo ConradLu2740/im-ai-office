@@ -45,6 +45,19 @@ tests/guard + tests/eval   回归安全网（26 断言 ≤0.2s；Eval 首轮基�
 | `services/auth` | RBAC 授权 |
 | `domain/` | schema.sql + 事件定义 |
 
+## 安全配置（Step4，均可选）
+
+| env | 作用 | 未设置时 |
+|---|---|---|
+| `IMAI_ADMIN_TOKEN` | 角色设置/审批决定需带 `X-IMAI-Admin-Token` 头 | 无鉴权 + WARN |
+| `IMAI_LOGIN_PASSWORD` | 登录需共享口令 | 匿名登录 + WARN |
+| `AUTH_TOKEN` | `/callback` 需带 `X-IMAI-Token` 头 | 回调放行 + WARN |
+| `IMAI_ALLOWED_ORIGINS` | CORS 白名单 | 默认桌面端+本地开发源 |
+| `IMAI_AI_MODE` | `async` 启用 Redis 事件化 AI（见《事件化异步Spec.md》） | sync |
+| `DATABASE_URL` | Postgres 连接串（设置且无 IMAI_DB 时启用） | SQLite |
+
+⚠️ 桌面打包前需 `tauri build` 人工验证（tauri.conf resources/CSP 有变更）。
+
 ## 快速开始
 
 ### 1. 启动基础依赖（Postgres + Redis）

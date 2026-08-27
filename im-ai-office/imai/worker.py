@@ -89,6 +89,12 @@ def _consume_loop(r):
         except Exception as e:
             if _stop.is_set():
                 break
+            if "NOGROUP" in str(e):
+                try:
+                    ensure_group(r)   # 外部 flushdb 后自愈（测试与运维场景）
+                except Exception:
+                    pass
+                continue
             print(f"[worker] xreadgroup 异常(5s后重试): {e}")
             time.sleep(5)
             continue

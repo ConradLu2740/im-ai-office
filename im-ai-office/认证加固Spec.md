@@ -1,6 +1,6 @@
 # IMAI · 认证加固 Spec（Step 4）
 
-> 时间：2026-08-27 ｜ 关联：《架构分析报告.md》Step 4（认证部分；前端框架化经评估推迟，见 §4）｜ 前置：step2-done
+> 时间：2026-08-27 ｜ **执行完成 2026-08-27**（guard_auth 6 用例全绿；兼容铁律验证通过：env 未设置时存量 40 用例原样全绿）｜ 关联：《架构分析报告.md》Step 4（认证部分；前端框架化经评估推迟，见 §4）｜ 前置：step2-done
 > 背景：现状 CORS `allow_origins=["*"]`、`/openim/login` 无凭据校验（任意 userID 可换 token）、`/api/role/set` 任何人可提权（击穿 RBAC 产品价值）、OpenIM 回调签名校验形同虚设（`_verify` 直接 return True）。
 
 ---
