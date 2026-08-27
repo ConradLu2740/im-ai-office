@@ -5,11 +5,34 @@
 ## 架构一句话
 
 ```
-OpenIM(单独部署) --Webhook--> oim-webhook --Redis Streams--> ai-agent --LLM--> 产出
-                                                                   |
-                                            board-api(任务/看板) + reminder(提醒) + auth(RBAC)
-                                            共用 Postgres
+OpenIM(单独部署) --Webhook/SDK网关--> 后端(FastAPI) --> AI 识别/消歧/确认卡 → 看板/提醒
+                                              |
+               Postgres/SQLite + Redis + LLM Provider(云端/本地可切换)
 ```
+
+## 代码分层（2026-08-27 Step1 拆层重组）
+
+```text
+app.py                     兼容入口：python3 app.py / uvicorn app:app
+imai/
+├── config.py              配置与环境常量、进程内 EVENTS 单例
+├── db.py                  SQLite 连接与建表（种子：两个小张消歧场景）
+├── repos.py               数据访问（SQL 集中）
+├── services/
+│   ├── pipeline.py        AI 编排：意图判定→归属判定→落库（测试 mock 锚点）
+│   ├── tasks.py           任务确认/驳回流转
+│   ├── rbac.py            角色/高风险审批/审计语义
+│   ├── memory.py          团队记忆：术语/群简介/注入/溯源/修正沉淀
+│   └── ai_dm.py           AI 私聊会话 + 歧义回复收敛
+├── integrations/
+│   ├── llm_provider.py    OpenAI 兼容 LLM 调用（云端/本地只换配置）
+│   └── openim_client.py   OpenIM 消息回写（唯一实现）
+└── api/                   FastAPI 路由组装(create_app)，对外路径零变化
+tests/guard + tests/eval   回归安全网（26 断言 ≤0.2s；Eval 首轮基线 19/20，见《回归加固Spec.md》）
+```
+
+> ⚠️ **桌面打包注意**：tauri.conf.json 的 bundle.resources 已含 `../../imai` 目录映射；
+> 打包机上需重新执行 tauri build 验证（Step1 重构无法在本机完成完整打包验证）。
 
 ## 组成
 

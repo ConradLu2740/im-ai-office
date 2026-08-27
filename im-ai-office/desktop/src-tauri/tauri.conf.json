@@ -39,8 +39,7 @@
     ],
     "resources": {
       "../../app.py": "backend/app.py",
-      "../../core.py": "backend/core.py",
-      "../../openim_client.py": "backend/openim_client.py",
+      "../../imai": "backend/imai/",
       "../../imai.db": "backend/imai.db",
       "../../.env": "backend/.env",
       "../../requirements.txt": "backend/requirements.txt",
