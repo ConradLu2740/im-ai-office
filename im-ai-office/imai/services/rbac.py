@@ -64,8 +64,8 @@ def list_approvals(con, status="pending"):
         c.execute("SELECT * FROM approval WHERE status=? ORDER BY id DESC", (status,))
     else:
         c.execute("SELECT * FROM approval ORDER BY id DESC")
-    cols = [d[0] for d in c.description]
-    return [dict(zip(cols, r)) for r in c.fetchall()]
+    from imai.db import _rows as _extract
+    return _extract(c)
 
 
 def decide_approval(con, approval_id, approved, decided_by):
@@ -81,7 +81,6 @@ def decide_approval(con, approval_id, approved, decided_by):
     row = c.fetchone()
     if not row:
         return None, None
-    cols = [d[0] for d in c.description]
-    r = dict(zip(cols, row))
+    r = dict(row) if isinstance(row, dict) else dict(zip([d[0] for d in c.description], row))
     detail = json.loads(r["detail"]) if r.get("detail") else None
     return r, detail

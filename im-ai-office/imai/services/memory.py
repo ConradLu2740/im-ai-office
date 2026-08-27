@@ -35,8 +35,7 @@ def get_grp_meta(con, oim_group_id):
     row = c.fetchone()
     if not row:
         return {"oim_group_id": oim_group_id, "intro": "", "ai_enabled": 1}
-    cols = [d[0] for d in c.description]
-    return dict(zip(cols, row))
+    return dict(row) if isinstance(row, dict) else dict(zip([d[0] for d in c.description], row))
 
 
 def set_grp_meta(con, oim_group_id, intro=None, ai_enabled=None):
@@ -105,8 +104,8 @@ def list_daily_unconfirmed(con, group_id=None, date=None):
         sql = "SELECT * FROM task WHERE status IN (?,?) ORDER BY id DESC"
         params = list(UNRESOLVED_STATUS)
     c.execute(sql, params)
-    cols = [d[0] for d in c.description]
-    return [dict(zip(cols, r)) for r in c.fetchall()]
+    from imai.db import _rows
+    return _rows(c)
 
 
 def build_daily_summary(con, group_id=None, date=None):
