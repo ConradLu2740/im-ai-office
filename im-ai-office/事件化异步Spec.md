@@ -1,6 +1,6 @@
 # IMAI · 事件化 + AI 异步化 Spec（Step 2）
 
-> 时间：2026-08-27 ｜ 关联：《架构分析报告.md》Step 2 ｜ 前置：step1-done（e1a31b6，imai/ 四层包已就位）
+> 时间：2026-08-27 ｜ **执行完成 2026-08-27**（D1 已执行：imai-ai-agent/oim-webhook 已停；guard sync 26×N 全绿、guard_async 7 用例双轮全绿、eval 对照波动归因云端 LLM 空响应/采样噪声非回归）｜ 关联：《架构分析报告.md》Step 2 ｜ 前置：step1-done（e1a31b6，imai/ 四层包已就位）
 > 核心目标：**用户的 HTTP 请求永不等待 LLM**；消息事件可靠入队、AI 判定异步消费、同源重放不产生重复任务。
 
 ---
