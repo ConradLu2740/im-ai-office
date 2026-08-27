@@ -54,7 +54,9 @@ def handle_one(r, redis_msg_id, fields):
         mark_consumed(con, msg_id)
         action = result.get("action")
         audit_log(con, "worker", "ai_processed",
-                  {"msgId": msg_id, "action": action, "taskId": result.get("task", {}).get("taskId"),
+                  {"msgId": msg_id, "action": action,
+                   "taskId": result.get("task", {}).get("taskId"),
+                   "content": (content or "")[:60],
                    "latency_ms": latency_ms, "source": fields.get("source")})
         print(f"[worker] {action} taskId={result.get('task', {}).get('taskId')} "
               f"latency={latency_ms}ms msgId={msg_id}")
