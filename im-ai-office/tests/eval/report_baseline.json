@@ -123,14 +123,14 @@
       "category": "E模糊承诺",
       "text": "这个我看看吧",
       "result": "info",
-      "summary": "is_task=True conf=low mode=self"
+      "summary": "is_task=False conf=medium mode=none"
     },
     {
       "id": "E2",
       "category": "E模糊承诺",
       "text": "我回头有空看看这个需求",
       "result": "info",
-      "summary": "is_task=False conf=medium mode=none"
+      "summary": "is_task=True conf=medium mode=self"
     },
     {
       "id": "F1",

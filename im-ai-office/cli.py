@@ -137,7 +137,7 @@ def cmd_status(args) -> int:
     print(f"python3          : {py}")
     print(f"node             : {node}")
     print(f"app.py 存在      : {(ROOT/'app.py').exists()}")
-    print(f"core.py 存在     : {(ROOT/'core.py').exists()}")
+    print(f"imai/ 包存在    : {(ROOT/'imai').is_dir()}")
     print(f"openim_client.py : {(ROOT/'openim_client.py').exists()}")
     print(f".env 存在        : {(ROOT/'.env').exists()}")
     print(f"网关 bundle      : {gw if gw else '未找到'}")
