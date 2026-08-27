@@ -28,6 +28,8 @@ def init_db(db_file=None):
     CREATE TABLE IF NOT EXISTS term(id INTEGER PRIMARY KEY AUTOINCREMENT, term TEXT NOT NULL UNIQUE, meaning TEXT NOT NULL, source TEXT DEFAULT 'manual', created_at TEXT DEFAULT (datetime('now')));
     -- M4 团队记忆: 群简介/旁听开关
     CREATE TABLE IF NOT EXISTS grp_meta(oim_group_id TEXT PRIMARY KEY, intro TEXT DEFAULT '', ai_enabled INTEGER DEFAULT 1, updated_at TEXT DEFAULT (datetime('now')));
+    -- Step2 事件去重（async 模式生效；窗口语义见 bus.is_duplicate）
+    CREATE TABLE IF NOT EXISTS event_dedup(msg_id TEXT PRIMARY KEY, consumed_at TEXT DEFAULT (datetime('now')));
     """)
     # 种子人 + 别名（制造「两个小张」消歧场景），仅当为空
     c.execute("SELECT COUNT(*) FROM person")

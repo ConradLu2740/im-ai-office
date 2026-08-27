@@ -19,6 +19,12 @@ OPENIM_API = os.environ.get("OPENIM_API", "http://127.0.0.1:10002")
 OPENIM_ADMIN_TOKEN = os.environ.get("OPENIM_ADMIN_TOKEN", "")
 OPENIM_SECRET = os.environ.get("OPENIM_SECRET", "openIM123")
 
+# ============ Step2 事件化（AI 异步模式）============
+# sync（默认）：入口同步跑 AI，行为与 Step1 完全一致；async：入队即返回，worker 后台消费
+AI_MODE = os.environ.get("IMAI_AI_MODE", "sync")
+REDIS_URL = os.environ.get("IMAI_REDIS_URL", "redis://127.0.0.1:6379/0")
+DEDUP_WINDOW_SEC = int(os.environ.get("IMAI_DEDUP_WINDOW_SEC", "1800"))  # 同 msgId 去重窗口
+
 # 进程内事件队列（模拟 Redis Streams；真实环境用 Redis）
 # 单例共享：pipeline 写入、routes 读取，严禁各处另建 list。
 EVENTS = []
