@@ -9,6 +9,7 @@ DM 收发/未读闭环 + 歧义回复收敛（resolve_assignee_reply/resolve_tas
 import json
 
 from imai.config import EVENTS
+from imai.db import take_id
 from imai.repos import (get_task_dict, latest_pending_assignee_by_dm_taskid,
                         latest_pending_assignee_for_creator)
 from imai.services.tasks import confirm_task, reject_task
@@ -67,10 +68,11 @@ def resolve_assignee_reply(con, sender, reply):
 def ai_dm_send(con, sender_id, text, task_id=None, direction="out"):
     """记录一条 AI 助手会话消息。direction: out=AI发出 in=用户回复。"""
     c = con.cursor()
-    c.execute("INSERT INTO ai_dm(sender_id, direction, content, task_id) VALUES(?,?,?,?)",
+    c.execute("INSERT INTO ai_dm(sender_id, direction, content, task_id) VALUES(?,?,?,?) RETURNING id",
               (sender_id, direction, text, task_id))
+    mid = take_id(c)
     con.commit()
-    return c.lastrowid
+    return mid
 
 
 def ai_dm_list(con, sender_id=None):

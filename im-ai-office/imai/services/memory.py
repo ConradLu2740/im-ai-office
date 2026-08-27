@@ -84,9 +84,9 @@ def build_sys_ctx(con, group_id):
         ctx.append("【术语】" + "；".join(f"{t['term']}={t['meaning']}" for t in terms))
     names = []
     for r in alias_label_rows(con):
-        label = r[1] or r[2] or ""
-        if r[0] and label and r[0] != label:
-            names.append(f"{r[0]}={label}")
+        label = r["real_name"] or r["flower_name"] or ""
+        if r["name"] and label and r["name"] != label:
+            names.append(f"{r['name']}={label}")
     if names:
         ctx.append("【人称】" + "；".join(sorted(set(names))))
     return "\n".join(ctx)
@@ -138,7 +138,7 @@ def memory_proofs(con, text):
         if t["term"] and t["term"] in text:
             proofs.append({"type": "term", "term": t["term"], "meaning": t["meaning"], "source": t["source"]})
     for r in alias_label_rows(con):
-        name, real, flower = r[0], r[1], r[2]
+        name, real, flower = r["name"], r["real_name"], r["flower_name"]
         # 只要 name 是别名/花名（不等于正名）且出现在文本，就作为依据
         if name and name in text and name != real:
             proofs.append({"type": "person", "term": name, "meaning": real or flower, "source": "alias"})
