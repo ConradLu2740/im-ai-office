@@ -851,6 +851,23 @@ function renderAICard(r) {
   box.scrollTop = box.scrollHeight;
 }
 
+// Step2 实时事件（SSE，后端 async 模式才有事件；sync 模式下 EventSource 会静默重试、无影响）
+let esAI = null;
+function initSSE() {
+  if (!window.EventSource || esAI) return;
+  try {
+    esAI = new EventSource(API_BASE + "/api/events/stream");
+    esAI.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === "task_created" || ev.type === "ai.card") loadTasks();
+        if (ev.type === "task_created") updateAIUnread();
+      } catch (_) {}
+    };
+    // EventSource 断线自动重连；无需手动重建
+  } catch (_) { esAI = null; }
+}
+
 // 初始化
 window.onload = () => {
   const savedUser = localStorage.getItem("imai_user");
@@ -864,6 +881,7 @@ window.onload = () => {
   setInterval(checkBackend, 3000);
   setInterval(loadTasks, 5000);
   setInterval(updateAIUnread, 5000);
+  initSSE();   // 新增：实时事件推送（轮询保留作兑底）
   if (tauriInvoke) setTimeout(startBackend, 500);
 };
 </script>

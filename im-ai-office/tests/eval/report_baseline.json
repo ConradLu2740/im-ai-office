@@ -2,7 +2,7 @@
   "meta": {
     "generated_note": "首轮 AI 质量基线（详见 回归加固Spec.md §5）",
     "hard_total": 20,
-    "hard_pass": 19,
+    "hard_pass": 18,
     "info_observed": 2,
     "f_misfire": 0,
     "quality_line_F_le": 1
@@ -30,7 +30,7 @@
     },
     "G截止变体": {
       "total": 3,
-      "pass": 3
+      "pass": 2
     }
   },
   "details": [
@@ -130,7 +130,7 @@
       "category": "E模糊承诺",
       "text": "我回头有空看看这个需求",
       "result": "info",
-      "summary": "is_task=True conf=medium mode=self"
+      "summary": "is_task=False conf=medium mode=none"
     },
     {
       "id": "F1",
@@ -178,8 +178,8 @@
       "id": "G2",
       "category": "G截止变体",
       "text": "下周一我会把预算表发到群里",
-      "result": "pass",
-      "summary": "全部命中"
+      "result": "fail",
+      "summary": "is_task 期望 True 实得 False; mode 期望 self 实得 none; deadline 需含『周一』实得 None"
     },
     {
       "id": "G3",
