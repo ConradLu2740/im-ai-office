@@ -14,6 +14,10 @@ LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 DB_FILE = os.environ.get("IMAI_DB", os.path.join(os.path.dirname(__file__) or ".", "imai.db"))
 
+# ============ LLM provider：已切换为 DeepSeek 官方 API ============
+# 迭代2：瞬时空响应/网络错误自动重试；总尝试 = 1 + LLM_RETRIES；4xx(非408/429) 不重试
+LLM_RETRIES = int(os.environ.get("IMAI_LLM_RETRIES", "2"))
+
 # OpenIM 服务端接入（自旧 app.py 迁移）
 OPENIM_API = os.environ.get("OPENIM_API", "http://127.0.0.1:10002")
 OPENIM_ADMIN_TOKEN = os.environ.get("OPENIM_ADMIN_TOKEN", "")
