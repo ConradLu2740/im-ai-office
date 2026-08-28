@@ -24,6 +24,7 @@ services:
   # 见 README「联调 OpenIM」
 
   oim-webhook:
+    profiles: ["legacy"]
     build: ./services/oim-webhook
     container_name: imai-oim-webhook
     environment:
@@ -35,6 +36,7 @@ services:
       - redis
 
   ai-agent:
+    profiles: ["legacy"]
     build: ./services/ai-agent
     container_name: imai-ai-agent
     environment:
@@ -53,6 +55,7 @@ services:
       - redis
 
   board-api:
+    profiles: ["legacy"]
     build: ./services/board-api
     container_name: imai-board-api
     environment:
@@ -64,6 +67,7 @@ services:
       - postgres
 
   reminder:
+    profiles: ["legacy"]
     build: ./services/reminder
     container_name: imai-reminder
     environment:
