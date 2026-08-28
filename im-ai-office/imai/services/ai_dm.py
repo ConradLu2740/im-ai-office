@@ -92,7 +92,11 @@ def ai_dm_unread_count(con, sender_id=None):
         c.execute("SELECT COUNT(*) FROM ai_dm WHERE sender_id=? AND direction='in' AND read_flag=0", (sender_id,))
     else:
         c.execute("SELECT COUNT(*) FROM ai_dm WHERE direction='in' AND read_flag=0")
-    return c.fetchone()[0]
+    row = c.fetchone()
+    # SQLite 为 Row（位置索引）、PG 为 dict（键=列名）——统一取第一列（Step3 遗留兼容，2026-08-28）
+    if row is None:
+        return 0
+    return next(iter(row.values())) if isinstance(row, dict) else row[0]
 
 
 def ai_dm_mark_read(con, sender_id=None):
