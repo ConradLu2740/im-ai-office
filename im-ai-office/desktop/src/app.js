@@ -293,7 +293,7 @@ async function selectAISession() {
 async function loadAIMessages() {
   try {
     const res = await api("/api/ai_dm", { method: "GET", headers: { "Content-Type": "application/json" }, body: null });
-    if (!res.ok) return;
+    if (!res.ok && !res.messages) return; // 有 messages 即使缺 ok 也渲染（双保险）
     const box = document.getElementById("messages");
     box.innerHTML = "";
     (res.messages || []).forEach(m => {
