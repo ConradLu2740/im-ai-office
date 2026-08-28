@@ -1,0 +1,690 @@
+const API_BASE = "http://127.0.0.1:8000";
+const fmt = (s) => (s == null ? "—" : s);
+let tauriInvoke = null;
+try { tauriInvoke = window.__TAURI__.core.invoke; } catch (e) { tauriInvoke = null; }
+
+// 当前登录状态
+let currentUser = null;
+let currentToken = null;
+let currentConversation = null;
+
+async function api(path, opts = {}) {
+  const method = (opts.method || "GET").toUpperCase();
+  let body = undefined;
+  if (opts.body) {
+    try { body = JSON.parse(opts.body); } catch (e) { body = opts.body; }
+  }
+  if (tauriInvoke) {
+    try {
+      return await tauriInvoke("api_call", { method, path, body });
+    } catch (e) {
+      throw new Error(`${e} (${path})`);
+    }
+  }
+  const res = await fetch(API_BASE + path, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+function logDebug(info) {
+  const card = document.createElement("div");
+  card.className = "ai-card";
+  card.innerHTML = "<b>🐞 诊断信息</b><pre style='font-size:11px;color:#5a6482;'>" + JSON.stringify(info, null, 2) + "</pre>";
+  document.getElementById("messages").appendChild(card);
+}
+
+function setBackendStatus(ok, text) {
+  document.getElementById("statusDot").className = "dot" + (ok ? " ok" : "");
+  document.getElementById("statusText").textContent = text;
+}
+
+async function startBackend() {
+  if (!tauriInvoke) return alert("当前不是桌面应用环境");
+  setBackendStatus(false, "正在启动后端...");
+  document.getElementById("startBtn").style.display = "none";
+  try {
+    const status = await tauriInvoke("start_backend");
+    setBackendStatus(status.running, status.message);
+  } catch (e) {
+    setBackendStatus(false, "启动失败");
+    logDebug({ action: "start_backend", error: e.message || String(e) });
+    document.getElementById("startBtn").style.display = "inline-block";
+  }
+}
+
+async function runDiagnose() {
+  if (!tauriInvoke) return;
+  try {
+    const info = await tauriInvoke("diagnose");
+    logDebug({ action: "diagnose", ...info });
+  } catch (e) {
+    logDebug({ action: "diagnose", error: e.message || String(e) });
+  }
+}
+
+async function checkBackend() {
+  try {
+    await api("/api/tasks");
+    setBackendStatus(true, "后端已连接");
+  } catch (e) {
+    setBackendStatus(false, "后端未启动");
+    if (tauriInvoke) document.getElementById("startBtn").style.display = "inline-block";
+  }
+}
+
+// ============ 登录 ============
+function swapUser() {
+  const sel = document.getElementById("quickUser");
+  const input = document.getElementById("loginUser");
+  const v = sel.value;
+  if (v === "__custom__") {
+    sel.selectedIndex = 0; // 回到默认选项
+    input.focus();
+    input.select();
+    return;
+  }
+  input.value = v;
+}
+
+async function doLogin() {
+  const user = document.getElementById("loginUser").value.trim();
+  if (!user) return alert("请输入用户ID");
+  const password = (document.getElementById("loginPassword") || {}).value || "";
+  try {
+    const res = await api("/openim/login", { method: "POST", body: JSON.stringify({ user_id: user, password }) });
+    if (res.ok) {
+      currentUser = user;
+      currentToken = res.token;
+      localStorage.setItem("imai_user", user);
+      localStorage.setItem("imai_token", res.token);
+      enterMainApp();
+      initSDK(user, res.token);
+    } else {
+      alert("登录失败：" + res.error);
+    }
+  } catch (e) {
+    alert("登录异常：" + e.message);
+  }
+}
+
+function logout() {
+  localStorage.removeItem("imai_user");
+  localStorage.removeItem("imai_token");
+  currentUser = null;
+  currentToken = null;
+  currentConversation = null;
+  document.getElementById("mainApp").classList.add("hidden");
+  document.getElementById("loginPage").classList.remove("hidden");
+}
+
+// ============ OpenIM SDK 实时消息 ============
+let sdk = null;
+let connected = false;
+let msgCount = 0;
+let lastMsgSeq = 0;
+let pollTimer = null;
+
+function setSDKStatus(text, ok) {
+  const el = document.getElementById("sdkStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = ok ? "#1a9e6c" : "#d64550";
+}
+
+async function initSDK(userID, token) {
+  // 网关凭证由后端启动时的 gateway_auto_login 管理（user001, Web/5），
+  // 前端不再拿 UI token 调 /gw/login —— Web SDK 平台固定，异平台 token 会永远连不上；
+  // 且 UI 登录签发的新 token 会顶掉网关旧 token（互踢）。这里只等网关就绪（最多 30s）。
+  setSDKStatus("网关连接中...", false);
+  let up = false;
+  for (let i = 0; i < 15; i++) {
+    try {
+      const ping = await api("/gw/ping", { method: "GET" });
+      if (ping !== undefined) { up = true; break; }
+    } catch (e) {}
+    setSDKStatus(`网关连接中... ${i * 2}s`, false);
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  if (!up) { setSDKStatus("网关未就绪：请稍后重启应用重试", false); return; }
+  await loadGatewayConversations();
+  setSDKStatus("IM 已连接 ✅", true);
+  startPoll();
+}
+
+async function loadGatewayConversations() {
+  try {
+    const res = await api("/gw/conversations", { method: "GET" });
+    if (res.ok) renderSessions(res.conversations || []);
+    else setSDKStatus("会话加载失败：" + (res.error || "") + "（可点会话栏刷新）", false);
+  } catch (e) { setSDKStatus("会话加载异常：" + (e?.message||e), false); }
+}
+
+function startPoll() {
+  if (pollTimer) clearInterval(pollTimer);
+  let pollTick = 0;
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await api(`/gw/poll?since=${lastMsgSeq}`, { method: "GET" });
+      if (res.ok && res.messages && res.messages.length) {
+        res.messages.forEach(m => renderGWMessage(m));
+        lastMsgSeq = res.lastSeq || lastMsgSeq;
+        msgCount += res.messages.length;
+        setSDKStatus(`IM 已连接 ✅ · 收 ${msgCount} 条`, true);
+      }
+    } catch (e) {}
+    // 每 ~15s 自愈刷新一次会话列表（SDK 晚同步/中途异常都能恢复）
+    if (++pollTick % 10 === 0) { try { loadGatewayConversations(); } catch (_) {} }
+  }, 1500);
+}
+
+function renderSessions(convs) {
+  const box = document.getElementById("sessionList");
+  if (!box) return;
+  // 网关 /gw/conversations 的 conversations 是 SDK 事件包装对象（真数组在 .data）；REST 路径则是数组
+  const arr = Array.isArray(convs) ? convs : ((convs && convs.data) || []);
+  let html = `<div class="session" id="aiSession" data-action="selectAISession">
+      <div class="avatar ai">AI</div>
+      <div class="session-info"><div class="session-title">AI 助手</div><div class="session-preview">任务确认与提醒</div></div>
+      <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
+    </div>`;
+  html += arr.map(c => {
+    const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话"));
+    const type = c.conversationType === 3 ? 3 : 1;
+    let last = "";
+    try { last = c.latestMsg ? (JSON.parse(c.latestMsg)?.textElem?.content || "") : ""; } catch (_) {}
+    return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conversationID)}" data-target-id="${escAttr(c.groupID || c.userID)}" data-name="${escAttr(name)}" data-type="${type}">
+      <div class="avatar">${name.slice(0,1)}</div>
+      <div class="session-info"><div class="session-title">${name}</div>
+      <div class="session-preview">${last || "暂无消息"}</div></div>
+      <div class="session-meta">${c.unreadCount ? `<span class="badge">${c.unreadCount}</span>` : ""}</div>
+    </div>`;
+  }).join("");
+  box.innerHTML = html;
+}
+
+function renderGWMessage(m) {
+  const box = document.getElementById("messages");
+  if (!box) return;
+  const self = m.sendID === currentUser;
+  const sender = m.senderNickname || m.sendID || "未知";
+  const d = document.createElement("div");
+  d.className = "msg" + (self ? " self" : "");
+  d.innerHTML = `<div class="avatar">${(self ? "我" : sender.slice(0,1))}</div>
+    <div><div class="msg-content">${(m.content||"").replace(/\n/g,"<br>")}</div>
+    <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${self ? "你" : sender} ${new Date(m.sendTime||Date.now()).toLocaleTimeString()}</div></div>`;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderConversationsFromSDK(convs) { renderSessions(convs || []); }
+
+function handleSDKMessage(m) {
+  renderGWMessage(m);
+}
+
+function enterMainApp() {
+  document.getElementById("loginPage").classList.add("hidden");
+  document.getElementById("mainApp").classList.remove("hidden");
+  loadConversations();
+  loadTasks();
+  updateAIUnread();
+}
+
+// ============ 会话 ============
+async function loadConversations() {
+  // OpenIM 对刚签发 token 偶发抖动（低频 404/空响应），失败自动重试一次
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
+      if (res.ok) { renderConversations(res.conversations || []); return; }
+      if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+      alert("获取会话失败：" + res.error);
+    } catch (e) {
+      if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+      alert("获取会话异常：" + e.message);
+    }
+  }
+}
+
+function renderConversations(list) {
+  const box = document.getElementById("sessionList");
+  let html = `<div class="session" id="aiSession" data-action="selectAISession">
+      <div class="avatar ai">AI</div>
+      <div class="session-info">
+        <div class="session-title">AI 助手</div>
+        <div class="session-preview" id="aiPreview">任务确认与提醒</div>
+      </div>
+      <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
+    </div>`;
+  html += list.map(c => {
+    const name = c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话");
+    const type = c.conversationType === 3 ? "群" : "单聊";
+    return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conversationID)}" data-target-id="${escAttr(c.groupID || c.userID)}" data-name="${escAttr(name)}" data-type="${c.conversationType}">
+      <div class="avatar">${name.slice(0,1)}</div>
+      <div class="session-info">
+        <div class="session-title">${name}</div>
+        <div class="session-preview">${type} · 点击开始聊天</div>
+      </div>
+    </div>`;
+  }).join("");
+  box.innerHTML = html;
+}
+
+let inAISession = false;
+
+async function selectAISession() {
+  inAISession = true;
+  currentConversation = { id: "ai_dm", targetId: "imai_assistant", name: "AI 助手", type: "ai" };
+  document.getElementById("chatTitle").textContent = "AI 助手";
+  document.getElementById("chatSub").textContent = "任务确认与智能提醒";
+  document.getElementById("messages").innerHTML = "";
+  document.querySelectorAll(".session").forEach(el => el.classList.remove("active"));
+  document.getElementById("aiSession").classList.add("active");
+  await loadAIMessages();
+}
+
+async function loadAIMessages() {
+  try {
+    const res = await api("/api/ai_dm", { method: "GET", headers: { "Content-Type": "application/json" }, body: null });
+    if (!res.ok) return;
+    const box = document.getElementById("messages");
+    box.innerHTML = "";
+    (res.messages || []).forEach(m => {
+      const self = m.direction === "in";
+      const d = document.createElement("div");
+      d.className = "msg" + (self ? " self" : "");
+      d.innerHTML = `<div class="avatar ${self ? "" : "ai"}">${self ? "我" : "AI"}</div>
+        <div><div class="msg-content">${(m.content || "").replace(/\n/g,"<br>")}</div>
+        <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${m.ts || ""}</div></div>`;
+      box.appendChild(d);
+    });
+    box.scrollTop = box.scrollHeight;
+    // 已读
+    await api("/api/ai_dm/read", { method: "POST", body: JSON.stringify({}) });
+    updateAIUnread();
+  } catch (e) {}
+}
+
+async function updateAIUnread() {
+  try {
+    const res = await api("/api/ai_dm");
+    const el = document.getElementById("aiUnread");
+    const cnt = res.unread || 0;
+    el.style.display = cnt ? "inline-block" : "none";
+    el.textContent = cnt;
+  } catch (e) {}
+}
+
+function selectConversation(convId, targetId, name, convType, el) {
+  currentConversation = { id: convId, targetId, name, type: convType };
+  document.getElementById("chatTitle").textContent = name;
+  document.getElementById("chatSub").textContent = convType === 3 ? "群聊 · AI 旁听中" : "单聊";
+  document.getElementById("messages").innerHTML = "";
+  document.querySelectorAll(".session").forEach(s => s.classList.remove("active"));
+  (el || event?.currentTarget)?.classList?.add("active");
+  loadMessageHistory(convId);
+}
+
+async function loadMessageHistory(convId) {
+  try {
+    const res = await api(`/api/messages?conv_id=${encodeURIComponent(convId)}`);
+    if (!res.messages || !res.messages.length) return;
+    const box = document.getElementById("messages");
+    box.innerHTML = "";
+    (res.messages || []).forEach(m => {
+      const self = m.is_self == 1;
+      const d = document.createElement("div");
+      d.className = "msg" + (self ? " self" : "");
+      d.innerHTML = `<div class="avatar">${(self ? "我" : (m.sender_name || "?")).slice(0,1)}</div>
+        <div><div class="msg-content">${(m.content || "").replace(/\n/g,"<br>")}</div>
+        <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${self ? "你" : (m.sender_name || "")} ${m.ts || ""}</div></div>`;
+      box.appendChild(d);
+    });
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {}
+}
+
+// ============ 消息 ============
+function toggleSim() {
+  const box = document.getElementById("simBox");
+  box.style.display = box.style.display === "none" ? "flex" : "none";
+}
+
+async function sendSim() {
+  const sender = document.getElementById("simSender").value.trim() || "同事";
+  const text = document.getElementById("simText").value.trim();
+  if (!text) return alert("请输入消息内容");
+  const convId = "sg_simulated";
+  try {
+    const res = await api("/api/simulate_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender, text, conv_id: convId }) });
+    if (res.ok) {
+      // 显示到聊天区（别人发的，左侧）
+      const box = document.getElementById("messages");
+      const d = document.createElement("div");
+      d.className = "msg";
+      d.innerHTML = `<div class="avatar">${sender.slice(0,1)}</div>
+        <div><div class="msg-content">${text.replace(/\n/g,"<br>")}</div>
+        <div class="msg-meta">${sender} 刚刚</div></div>`;
+      box.appendChild(d);
+      box.scrollTop = box.scrollHeight;
+      // AI 卡片
+      if (res.ai) renderAICard(res.ai);
+      // 刷新看板
+      loadTasks();
+      document.getElementById("simText").value = "";
+    } else {
+      alert("模拟失败：" + res.error);
+    }
+  } catch (e) {
+    alert("模拟异常：" + e.message);
+  }
+}
+
+async function sendMsg() {
+  const input = document.getElementById("msg");
+  const text = input.value.trim();
+  if (!text) return;
+  if (!currentConversation) return alert("请先选择一个会话");
+
+  // 本地先渲染
+  const msgs = document.getElementById("messages");
+  const selfMsg = document.createElement("div");
+  selfMsg.className = "msg self";
+  selfMsg.innerHTML = `<div class="msg-content">${text.replace(/\n/g,"<br>")}</div><div class="msg-meta" style="text-align:right;">你 刚刚</div>`;
+  msgs.appendChild(selfMsg);
+  msgs.scrollTop = msgs.scrollHeight;
+  input.value = "";
+
+  // AI 助手会话：回复数字确认
+  if (currentConversation.type === "ai") {
+    try {
+      const res = await api("/api/tasks/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender_id: currentUser, choice: text }) });
+      if (!res.ok) {
+        alert("确认失败：" + (res.error || res.reason || "无待确认任务"));
+      } else {
+        await loadAIMessages();
+        loadTasks();
+      }
+    } catch (e) {
+      alert("确认异常：" + e.message);
+    }
+    return;
+  }
+
+  // 群聊/单聊：调网关发送（双工）
+  try {
+    const payload = {
+      content: text,
+    };
+    if (currentConversation.type === 3) {
+      payload.groupID = currentConversation.targetId;
+    } else {
+      payload.recvID = currentConversation.targetId;
+    }
+    const res = await api("/gw/send", { method: "POST", body: JSON.stringify(payload) });
+    if (!res.ok) {
+      alert("发送失败：" + (res.error || "网关未连接"));
+    } else {
+      // 后端 AI 识别
+      try {
+        const aiRes = await api("/api/sdk_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender: currentUser, text, conv_id: currentConversation.id, send_id: currentUser }) });
+        if (aiRes && aiRes.ai) { renderAICard(aiRes.ai); loadTasks(); }
+      } catch(e) {}
+    }
+    // 发送后刷新看板
+    setTimeout(loadTasks, 1500);
+    updateAIUnread();
+  } catch (e) {
+    alert("发送异常：" + e.message);
+  }
+}
+
+// ============ 看板 ============
+function renderTaskCard(t) {
+  const confCls = { high: "tag-high", medium: "tag-mid", low: "tag-low" };
+  const isPending = t.status === "pending_confirmation";
+  const proofs = (t.proofs || []).map(p => `${p.term}=${p.meaning || ""}`).slice(0, 2);
+  return `
+    <div class="task-card">
+      <div class="task-card-title">${fmt(t.content)}</div>
+      <div class="task-card-meta">
+        <span>#${t.id}</span>
+        <span>${fmt(t.assignee)}</span>
+        <span>${fmt(t.deadline)}</span>
+        ${t.confidence ? `<span class="tag ${confCls[t.confidence]||'tag-low'}">${t.confidence}</span>` : ""}
+      </div>
+      ${proofs.length ? `<div class="task-proof">依据：${esc(proofs.join("；"))}</div>` : ""}
+      ${isPending ? `<div class="ai-card-btns" style="margin-top:10px;">
+        <button class="primary" data-action="confirmTask" data-task-id="${t.id}">确认</button>
+        <button class="danger" data-action="rejectTask" data-task-id="${t.id}">驳回</button>
+      </div>` : ""}
+    </div>
+  `;
+}
+
+async function confirmTask(id) {
+  await api(`/api/tasks/${id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  loadTasks();
+}
+
+async function rejectTask(id) {
+  await api(`/api/tasks/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "负责人错了" }) });
+  loadTasks();
+}
+
+async function loadTasks() {
+  try {
+    const data = await api("/api/tasks");
+    const pendingAssignee = data.tasks.filter(t => t.status === "pending_assignee");
+    const pending = data.tasks.filter(t => t.status === "pending_confirmation");
+    const confirmed = data.tasks.filter(t => t.status === "confirmed");
+    document.getElementById("countPendingAssignee").textContent = pendingAssignee.length;
+    document.getElementById("countPending").textContent = pending.length;
+    document.getElementById("countConfirmed").textContent = confirmed.length;
+    document.getElementById("listPendingAssignee").innerHTML = pendingAssignee.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待指派任务</div>";
+    document.getElementById("listPending").innerHTML = pending.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待确认任务</div>";
+    document.getElementById("listConfirmed").innerHTML = confirmed.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无已确认任务</div>";
+    setBackendStatus(true, "后端已连接");
+  } catch (e) {
+    setBackendStatus(false, "后端未连接");
+  }
+}
+
+// ============ M3/M4 前端面板 ============
+function showPanel(name) {
+  document.getElementById("panel-board").style.display = name === "board" ? "" : "none";
+  document.getElementById("panel-approval").style.display = name === "approval" ? "" : "none";
+  document.getElementById("panel-memory").style.display = name === "memory" ? "" : "none";
+  document.getElementById("panel-summary").style.display = name === "summary" ? "" : "none";
+  document.querySelectorAll(".board-tabs .tab").forEach(t => {
+    t.classList.toggle("active", t.dataset.panel === name);
+  });
+}
+
+async function loadSummary() {
+  const box = document.getElementById("summaryBox");
+  try {
+    const data = await api("/api/summary/daily");
+    const text = (data.text || "").replace(/\n/g, "<br>");
+    box.innerHTML = `<div class="summary-text">${esc(text)}</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class='approval-empty'>生成失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function loadApprovals() {
+  const box = document.getElementById("approvalList");
+  try {
+    const data = await api("/api/approvals?status=pending");
+    const list = data.approvals || [];
+    if (!list.length) {
+      box.innerHTML = "<div class='approval-empty'>暂无待审批的高风险动作 ✅</div>";
+      return;
+    }
+    box.innerHTML = list.map(a => {
+      let detail = "";
+      try { detail = JSON.stringify(JSON.parse(a.detail), null, 2); } catch(e) { detail = a.detail; }
+      return `<div class="approval-item">
+        <div class="a-head"><span class="a-action">${esc(a.action)}</span><span style="font-size:11px;color:#8f959e;">#${a.id}</span></div>
+        <div class="a-detail">${esc(detail)}</div>
+        <div class="a-btns">
+          <button class="a-yes" data-action="approveApproval" data-approval-id="${a.id}">批准</button>
+          <button class="a-no" data-action="rejectApproval" data-approval-id="${a.id}">拒绝</button>
+        </div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function approveApproval(id) {
+  try {
+    const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: true }) });
+    alert(r.ok ? "已批准" : "批准失败：" + (r.error || ""));
+    loadApprovals(); loadTasks();
+  } catch (e) { alert("批准异常：" + e.message); }
+}
+
+async function rejectApproval(id) {
+  try {
+    const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: false }) });
+    alert(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""));
+    loadApprovals();
+  } catch (e) { alert("拒绝异常：" + e.message); }
+}
+
+async function loadMemory() {
+  const box = document.getElementById("memoryHtml");
+  try {
+    const data = await api("/api/memory");
+    const terms = data.memory.terms || [];
+    const gm = data.memory.grp_meta;
+    let html = "";
+    if (gm && gm.intro) {
+      html += `<div class="memory-block"><div class="memory-block-title">群简介</div><div class="memory-term">${esc(gm.intro)}</div></div>`;
+    }
+    html += `<div class="memory-block"><div class="memory-block-title">术语 / 人称记忆（${terms.length}）</div>`;
+    if (terms.length) {
+      html += terms.map(t => `<div class="memory-term"><b>${esc(t.term)}</b> = ${esc(t.meaning)} <span style="color:#8f959e;font-size:11px;">[${esc(t.source)}]</span></div>`).join("");
+    } else {
+      html += `<div style="color:#8f959e;font-size:12px;">暂无记忆，驳回/纠正会沉淀</div>`;
+    }
+    html += `</div>`;
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderAICard(r) {
+  const box = document.getElementById("messages");
+  if (!box) return;
+  const intent = r.intent || {};
+  let body = "";
+  if (r.action === "skip") {
+    body = "未识别到任务安排，已静默跳过。";
+  } else if (r.action === "confirm_assignee") {
+    const labels = (r.task?.candidates) || (r.assign?.ambiguous_labels) || [];
+    body = `<b>归属歧义</b>：检测到多个负责人，请到【AI 助手】会话回复数字确认。<br>`;
+    body += labels.map((c, i) => `${i+1}. ${c.label}`).join("<br>");
+  } else if (r.action === "task_created") {
+    const t = r.task || {};
+    body = `<b>已生成任务</b>：${fmt(t.content)}<br>负责人：${fmt(t.assignee)}<br>截止：${fmt(t.deadline)}`;
+  }
+  const card = document.createElement("div");
+  card.className = "ai-card";
+  card.innerHTML = `<div class="ai-card-header"><div class="ai-icon">AI</div><div class="ai-card-title">AI 助手</div></div><div class="ai-card-body">${body}</div>`;
+  box.appendChild(card);
+  box.scrollTop = box.scrollHeight;
+}
+
+// Step2 实时事件（SSE，后端 async 模式才有事件；sync 模式下 EventSource 会静默重试、无影响）
+let esAI = null;
+function initSSE() {
+  if (!window.EventSource || esAI) return;
+  try {
+    esAI = new EventSource(API_BASE + "/api/events/stream");
+    esAI.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === "task_created" || ev.type === "ai.card") loadTasks();
+        if (ev.type === "task_created") updateAIUnread();
+      } catch (_) {}
+    };
+    // EventSource 断线自动重连；无需手动重建
+  } catch (_) { esAI = null; }
+}
+
+// 初始化
+window.onload = () => {
+  const savedUser = localStorage.getItem("imai_user");
+  const savedToken = localStorage.getItem("imai_token");
+  if (savedUser && savedToken) {
+    currentUser = savedUser;
+    currentToken = savedToken;
+    enterMainApp();
+    initSDK(savedUser, savedToken);
+  }
+  setInterval(checkBackend, 3000);
+  setInterval(loadTasks, 5000);
+  setInterval(updateAIUnread, 5000);
+  initSSE();   // 新增：实时事件推送（轮询保留作兑底）
+  if (tauriInvoke) setTimeout(startBackend, 500);
+};
+
+// ============ 事件委托（替代内联 onclick；CSP 无 unsafe-inline 也能工作） ============
+function escAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function _dispatchAction(el) {
+  const d = el.dataset;
+  switch (d.action) {
+    case "doLogin": doLogin(); break;
+    case "logout": logout(); break;
+    case "loadGatewayConversations": loadGatewayConversations(); break;
+    case "loadTasks": loadTasks(); break;
+    case "toggleSim": toggleSim(); break;
+    case "sendSim": sendSim(); break;
+    case "sendMsg": sendMsg(); break;
+    case "loadApprovals": loadApprovals(); break;
+    case "loadMemory": loadMemory(); break;
+    case "loadSummary": loadSummary(); break;
+    case "startBackend": startBackend(); break;
+    case "runDiagnose": runDiagnose(); break;
+    case "selectAISession": selectAISession(); break;
+    case "selectConversation": selectConversation(d.convId, d.targetId, d.name, Number(d.type), el); break;
+    case "confirmTask": confirmTask(Number(d.taskId)); break;
+    case "rejectTask": rejectTask(Number(d.taskId)); break;
+    case "approveApproval": approveApproval(Number(d.approvalId)); break;
+    case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
+    case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  let el = e.target;
+  while (el && el !== document) {
+    if (el.dataset && el.dataset.action) { _dispatchAction(el); return; }
+    el = el.parentElement;
+  }
+}, true);
+
+// 非点击类绑定（原内联 onkeydown/onchange）
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && e.target && e.target.id === "msg") {
+    e.preventDefault();
+    sendMsg();
+  }
+});
+const _quickUser = document.getElementById("quickUser");
+if (_quickUser) _quickUser.addEventListener("change", swapUser);
