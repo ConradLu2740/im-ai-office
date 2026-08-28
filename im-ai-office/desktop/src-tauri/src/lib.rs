@@ -45,6 +45,17 @@ fn python_executable() -> PathBuf {
     if let Ok(py) = std::env::var("PYTHON_PATH") {
         return PathBuf::from(py);
     }
+    // Finder/Dock 启动的 app PATH 极简（/usr/bin:/bin:...），shell 里的安装位探测不到 → 先探测常见绝对路径
+    let home = std::env::var("HOME").unwrap_or_default();
+    for p in [
+        "/usr/local/bin/python3".to_string(),
+        "/opt/homebrew/bin/python3".to_string(),
+        format!("{home}/.local/bin/python3"),
+    ] {
+        if PathBuf::from(&p).exists() {
+            return PathBuf::from(p);
+        }
+    }
     for name in ["python3.12", "python3.11", "python3.10", "python3"] {
         if let Ok(path) = which::which(name) {
             return path;
@@ -56,6 +67,17 @@ fn python_executable() -> PathBuf {
 fn node_executable() -> PathBuf {
     if let Ok(n) = std::env::var("NODE_PATH") {
         return PathBuf::from(n);
+    }
+    // 同上：GUI 环境探测不到 /usr/local/bin 等 shell PATH，网关因此从未自启（2026-08-28 修复）
+    let home = std::env::var("HOME").unwrap_or_default();
+    for p in [
+        "/usr/local/bin/node".to_string(),
+        "/opt/homebrew/bin/node".to_string(),
+        format!("{home}/.local/node/bin/node"),
+    ] {
+        if PathBuf::from(&p).exists() {
+            return PathBuf::from(p);
+        }
     }
     for name in ["node", "nodejs"] {
         if let Ok(path) = which::which(name) {
@@ -140,14 +162,17 @@ async fn api_call(
 
 #[tauri::command]
 async fn start_backend() -> Result<BackendStatus, String> {
+    let root = workspace_root().map_err(|e| e.to_string())?;
     if is_backend_alive().await {
+        // 后端已在运行（可能是外部/上一次拉起的实例）：仍要确保网关就绪（2026-08-28 修复：
+        // 原捷径分支直接 return，网关永不尝试，消息发不出）
+        let gateway = start_gateway(&root).await.unwrap_or_else(|_| "网关未启动".into());
         return Ok(BackendStatus {
             running: true,
-            message: "后端已在运行".into(),
+            message: format!("后端已在运行，{}", gateway),
         });
     }
 
-    let root = workspace_root().map_err(|e| e.to_string())?;
     let py = python_executable();
 
     let log_file = OpenOptions::new()
