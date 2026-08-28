@@ -19,7 +19,7 @@ def ai_dm(sender_id: Optional[str] = None):
     msgs = ai_dm_list(con, sender_id)
     unread = ai_dm_unread_count(con, sender_id)
     con.close()
-    return {"messages": msgs, "unread": unread}
+    return {"ok": True, "messages": msgs, "unread": unread}
 
 
 @router.post("/api/ai_dm/read")
