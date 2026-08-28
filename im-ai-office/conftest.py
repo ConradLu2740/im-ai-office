@@ -28,6 +28,8 @@ except ImportError:
 _TMP_DB_DIR = Path("/tmp/imai_guard_pytest")
 _TMP_DB_DIR.mkdir(parents=True, exist_ok=True)
 os.environ["IMAI_DB"] = str(_TMP_DB_DIR / "guard.db")
+# 提醒调度线程在全部测试中禁用（guard_remind 直接调 scan_once；避免后台线程污染用例库）
+os.environ.setdefault("IMAI_REMIND_INTERVAL_SEC", "0")
 
 import pytest                                    # noqa: E402
 from fastapi.testclient import TestClient        # noqa: E402
@@ -47,7 +49,7 @@ for _auth_key in ("AUTH_TOKEN", "IMAI_ADMIN_TOKEN", "IMAI_LOGIN_PASSWORD"):
 import app as app_module                               # noqa: E402
 
 ALL_TABLES = ("task", "alias", "person", "audit", "ai_dm", "message",
-              "role", "approval", "term", "grp_meta", "event_dedup")
+              "role", "approval", "term", "grp_meta", "event_dedup", "reminder_sent")
 
 
 def wipe_and_seed():
