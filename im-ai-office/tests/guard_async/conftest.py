@@ -87,6 +87,25 @@ def fresh_db():
     _wipe()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _llm_never_real():
+    """会话级兑底：pipeline.llm_chat 永久替换为假实现。
+
+    根因（2026-08-28 实测）：函数级 fake_llm 用例结束即还原为真 LLM，
+    worker 后台线程在用例间隙处理漏网消息时打真 LLM（3-90s 网络调用），
+    吃掉后续用例等待窗口 → 偶发超时 + SQLite 锁冲突。
+    本 fixture 先装兑底，函数级 fake_llm 在其上覆盖、结束后还原到兑底，
+    竞态窗口确定性消除。"""
+    original = pipeline.llm_chat
+
+    def _fallback(system, user, json_mode=True):
+        return json.dumps({"is_task": False, "confidence": "low"})
+
+    pipeline.llm_chat = _fallback
+    yield
+    pipeline.llm_chat = original
+
+
 @pytest.fixture(autouse=True)
 def fake_llm(monkeypatch):
     """异步链路的固定 LLM 输出（autouse：避免用例间隙漏网消息打真 LLM 卡住 worker）。"""

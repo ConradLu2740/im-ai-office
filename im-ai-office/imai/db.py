@@ -161,7 +161,7 @@ def get_conn():
     """返回原生 sqlite3 连接或 PgConnection 包装（行均为 dict 可键访问）。"""
     if BACKEND == "postgres":
         return PgConnection(_pg_connect(DATABASE_URL))
-    con = sqlite3.connect(SQLITE_FILE)
+    con = sqlite3.connect(SQLITE_FILE, timeout=15)  # busy timeout 15s：worker 线程与用例并发写的容忍度
     con.row_factory = sqlite3.Row
     return con
 
@@ -217,6 +217,10 @@ def _pg_connect(url):
     import psycopg2
     import psycopg2.extras
     con = psycopg2.connect(url)
+    # 会话时区固定东八：否则 deadline_at 这类无时区文本会被按 UTC 解释，
+    # PG 模式下所有截止时间偏移 8 小时（提醒晚到/早到 8h，2026-08-28 修复）
+    con.cursor().execute("SET TIME ZONE 'Asia/Shanghai'")
+    con.commit()
     return con
 
 
