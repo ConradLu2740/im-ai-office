@@ -55,7 +55,10 @@ def openim_login(body: dict):
     try:
         data = _openim_post("/auth/get_user_token", {
             "secret": OPENIM_SECRET,
-            "platformID": 5,
+            # platformID=4(OSX 桌面端)：与 msg_gateway 的 Web(5) 会话分离。
+            # 同 user+platform 重复签发 token 会顶掉旧 token（TokenNotExistError），
+            # 曾导致 UI 每次登录都把网关踢下线、消息全部发送失败（2026-08-28 修复）
+            "platformID": 4,
             "userID": user_id,
         }, token=OPENIM_ADMIN_TOKEN)
         if data.get("errCode") == 0:
