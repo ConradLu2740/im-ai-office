@@ -47,12 +47,18 @@ def check_login_password(body):
 
 
 def check_callback_token(request):
-    """校验回调令牌（复用 AUTH_TOKEN env）。返回 None=通过；否则错误 dict。"""
+    """校验回调令牌（复用 AUTH_TOKEN env）。返回 None=通过；否则错误 dict。
+    支持 X-IMAI-Token 头或 ?token= 查询参数——OpenIM webhook 无法携带自定义头，
+    只能把 token 写进回调 URL；且 OpenIM 会把命令名追加到 URL 尾部
+    （?token=xxx/callbackAfter...），故取值后需剥离 / 后缀（2026-08-28）。"""
     expected = os.environ.get("AUTH_TOKEN", "")
     if not expected:
         _warn_once("callback", "AUTH_TOKEN 未设置，回调不校验令牌（内网自用默认）")
         return None
     if request.headers.get("X-IMAI-Token") == expected:
+        return None
+    qp = request.query_params.get("token") or ""
+    if qp.split("/")[0] == expected:
         return None
     return {"ok": False, "error": "callback token required"}
 
