@@ -399,18 +399,23 @@ function setSDKStatus(text, ok) {
 }
 
 async function initSDK(userID, token) {
-  // 通过 Node 消息网关连接 OpenIM（避免 WebView ws 限制）
+  // 网关凭证由后端启动时的 gateway_auto_login 管理（user001, Web/5），
+  // 前端不再拿 UI token 调 /gw/login —— Web SDK 平台固定，异平台 token 会永远连不上；
+  // 且 UI 登录签发的新 token 会顶掉网关旧 token（互踢）。这里只等网关就绪（最多 30s）。
   setSDKStatus("网关连接中...", false);
-  try {
-    const res = await api("/gw/login", { method: "POST", body: JSON.stringify({ userID, token }) });
-    if (!res.ok) { setSDKStatus("网关登录失败: " + (res.error||""), false); return; }
-    setSDKStatus("已连 OpenIM，同步会话...", false);
-    await loadGatewayConversations();
-    setSDKStatus("IM 已连接 ✅", true);
-    startPoll();
-  } catch (e) {
-    setSDKStatus("网关登录异常: " + (e?.message||e), false);
+  let up = false;
+  for (let i = 0; i < 15; i++) {
+    try {
+      const ping = await api("/gw/ping", { method: "GET" });
+      if (ping !== undefined) { up = true; break; }
+    } catch (e) {}
+    setSDKStatus(`网关连接中... ${i * 2}s`, false);
+    await new Promise(r => setTimeout(r, 2000));
   }
+  if (!up) { setSDKStatus("网关未就绪：请稍后重启应用重试", false); return; }
+  await loadGatewayConversations();
+  setSDKStatus("IM 已连接 ✅", true);
+  startPoll();
 }
 
 async function loadGatewayConversations() {
@@ -486,12 +491,17 @@ function enterMainApp() {
 
 // ============ 会话 ============
 async function loadConversations() {
-  try {
-    const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
-    if (!res.ok) return alert("获取会话失败：" + res.error);
-    renderConversations(res.conversations || []);
-  } catch (e) {
-    alert("获取会话异常：" + e.message);
+  // OpenIM 对刚签发 token 偶发抖动（低频 404/空响应），失败自动重试一次
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
+      if (res.ok) { renderConversations(res.conversations || []); return; }
+      if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+      alert("获取会话失败：" + res.error);
+    } catch (e) {
+      if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+      alert("获取会话异常：" + e.message);
+    }
   }
 }
 
