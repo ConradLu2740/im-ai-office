@@ -69,3 +69,15 @@ CREATE TABLE IF NOT EXISTS event_dedup (
   msg_id      TEXT PRIMARY KEY,
   consumed_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- 迭代1 补齐（2026-08-28）：到期提醒去重表（每任务每档位只发一次）
+CREATE TABLE IF NOT EXISTS reminder_sent (
+  id         BIGSERIAL PRIMARY KEY,
+  task_id    BIGINT,
+  tier       TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (task_id, tier)
+);
+
+-- deadline_at 双列：Step3 schema 实际未预留（与 Spec 声称不符），幂等补列
+ALTER TABLE task ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ;

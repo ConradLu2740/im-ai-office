@@ -44,8 +44,11 @@ def pg_backend(monkeypatch, pg):
     def _wipe():
         con = imai_db.get_conn()
         cur = con.cursor()
+        # 先 init 一次：保证新增表（如 reminder_sent）在旧测试库上存在，再清空
+        con_tmp = imai_db.init_db()
+        con_tmp.close()
         for t in ("task", "alias", "person", "audit", "ai_dm", "message",
-                  "role", "approval", "term", "grp_meta", "event_dedup"):
+                  "role", "approval", "term", "grp_meta", "event_dedup", "reminder_sent"):
             cur.execute(f"DELETE FROM {t}")
         con.commit()
         con.close()

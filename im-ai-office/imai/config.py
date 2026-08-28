@@ -39,3 +39,9 @@ HIGH_RISK_ACTIONS = {"assign_notify", "dm_send", "delete_task", "broadcast"}
 
 # 每日汇总要覆盖的“未定归属”状态
 UNRESOLVED_STATUS = ("pending_assignee", "pending_confirmation")
+
+# ============ 迭代1 补齐：到期提醒调度 ============
+# 调度线程每轮间隔；设为 0 完全关闭（测试基座用它禁线程，直接调 scan_once）
+REMIND_INTERVAL_SEC = int(os.environ.get("IMAI_REMIND_INTERVAL_SEC", "60"))
+# 提醒是否回写 OpenIM 群（默认关：防骚扰原则，Spec §1.3）
+REMIND_TO_GROUP = os.environ.get("IMAI_REMIND_TO_GROUP", "0") == "1"

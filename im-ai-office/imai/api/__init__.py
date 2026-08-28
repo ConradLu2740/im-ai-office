@@ -52,6 +52,12 @@ def create_app() -> FastAPI:
             else:
                 print("[app] AI worker 启动失败，本次会话降级为 sync 模式")
 
+        # 迭代1 补齐：到期提醒调度线程（sync/async 均启动；REMIND_INTERVAL_SEC=0 关闭，测试基座用它）
+        if _cfg.REMIND_INTERVAL_SEC > 0:
+            from imai import scheduler
+            if scheduler.start_scheduler_thread():
+                print(f"[app] 提醒调度已启动 (interval={_cfg.REMIND_INTERVAL_SEC}s)")
+
     # 启动时初始化数据库（原 app.py 模块级行为保留）
     from imai.db import get_conn as _get_conn, init_db as _init_db
     with _get_conn() as _con:

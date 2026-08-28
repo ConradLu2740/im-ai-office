@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS approval(id BIGSERIAL PRIMARY KEY, actor TEXT, action
 CREATE TABLE IF NOT EXISTS term(id BIGSERIAL PRIMARY KEY, term TEXT UNIQUE NOT NULL, meaning TEXT NOT NULL, source TEXT DEFAULT 'manual', created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS grp_meta(oim_group_id TEXT PRIMARY KEY, intro TEXT DEFAULT '', ai_enabled INTEGER DEFAULT 1, updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS event_dedup(msg_id TEXT PRIMARY KEY, consumed_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS reminder_sent(id BIGSERIAL PRIMARY KEY, task_id INTEGER, tier TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(task_id, tier));
 """
 
 SEED_PERSONS = [
@@ -172,6 +173,8 @@ def init_db(db_file=None):
         cur = con.cursor()
         for stmt in [st.strip() for st in POSTGRES_SCHEMA.split(";") if st.strip()]:
             cur.execute(stmt)
+        # 迭代1 补齐：对已存在的旧库幂等补齐（CREATE IF NOT EXISTS 对已存在的表不生效）
+        cur.execute("ALTER TABLE task ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ")
         cur.execute("SELECT COUNT(*) AS n FROM person")
         if cur.fetchone()["n"] == 0:
             cur.executemany("INSERT INTO person(id, real_name, flower_name, title, group_id) "
@@ -199,6 +202,7 @@ def init_db(db_file=None):
     CREATE TABLE IF NOT EXISTS term(id INTEGER PRIMARY KEY AUTOINCREMENT, term TEXT NOT NULL UNIQUE, meaning TEXT NOT NULL, source TEXT DEFAULT 'manual', created_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS grp_meta(oim_group_id TEXT PRIMARY KEY, intro TEXT DEFAULT '', ai_enabled INTEGER DEFAULT 1, updated_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS event_dedup(msg_id TEXT PRIMARY KEY, consumed_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS reminder_sent(id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER, tier TEXT, created_at TEXT DEFAULT (datetime('now')), UNIQUE(task_id, tier));
     """)
     c.execute("SELECT COUNT(*) FROM person")
     if c.fetchone()[0] == 0:
