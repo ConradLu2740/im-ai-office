@@ -155,6 +155,8 @@ def extract_text_content(raw):
 
 def handle_openim_callback(payload: dict):
     """处理 OpenIM afterSendGroupMsg / afterSendSingleMsg 回调。"""
+    # 观测日志：回调载荷形状历史上多次与预期不符（静默跳过难排查），保留关键轨迹
+    print(f"[callback] keys={sorted(payload.keys())}")
     # 支持多种字段名
     msg_id = payload.get("msgID") or payload.get("msgId") or payload.get("msg_id") or ""
     grp_id = payload.get("groupID") or payload.get("group_id") or ""
@@ -165,6 +167,7 @@ def handle_openim_callback(payload: dict):
     content = extract_text_content(payload.get("content", ""))
 
     if not content:
+        print(f"[callback] empty_content! payload={json.dumps(payload, ensure_ascii=False)[:400]}")
         return {"ok": True, "handled": False, "reason": "empty_content"}
 
     # 文本消息才处理
@@ -173,6 +176,25 @@ def handle_openim_callback(payload: dict):
 
     # 群消息：AI 旁听并识别任务
     if grp_id:
+        # 网关自发送（platform 5）：历史落库与 AI 都由前端 sdk_message 路径负责；
+        # 回调再处理会同消息双写双触发（实证 #79/#80 重复任务），直接跳过。
+        # 此分支仅服务来自其他客户端的消息（落库 + AI）。
+        if int(payload.get("senderPlatformID") or 0) == 5:
+            return {"ok": True, "handled": True, "action": "owned_by_sdk_path"}
+        # 落库历史（此前回调只触发 AI、从不存消息 → UI 进群永远空白，2026-08-28 补上）；
+        # content 可能是 JSON 包装串，清洗为纯文本
+        content_clean = content
+        try:
+            _inner = json.loads(content)
+            if isinstance(_inner, dict) and isinstance(_inner.get("content"), str):
+                content_clean = _inner["content"]
+        except Exception:
+            pass
+        con = get_conn()
+        try:
+            message_add(con, f"sg_{grp_id}", sender_id, sender_nickname, content_clean, is_self=0)
+        finally:
+            con.close()
         result = process_message(content, sender_nickname, group_id=grp_id)
         if result.get("action") == "confirm_assignee":
             # 副作用链收敛至 services.actions（溯源标注/ai_dm/OpenIM 私聊/SSE 播报）
@@ -239,6 +261,14 @@ async def openim_callback(request: Request):
             source="callback")
         return {"ok": True, "accepted": True, "queued_event": str(eid)}
     return handle_openim_callback(payload)
+
+
+@router.post("/callback/{command}")
+async def openim_callback_command(request: Request, command: str):
+    """OpenIM 实际回调 URL = 配置 URL + /命令名（如
+    /callback/callbackAfterSendGroupMsgCommand）；统一转交 /callback 处理
+    （2026-08-28 修复：此前子路径 404，群消息从未落库/触发 AI）。"""
+    return await openim_callback(request)
 
 
 # ============ 网关自动登录（启动后台线程，全兜底不阻塞）============
