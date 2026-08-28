@@ -1,3 +1,6 @@
+window.onerror = function(msg, src, line){
+  document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
+};
 const API_BASE = "http://127.0.0.1:8000";
 const fmt = (s) => (s == null ? "—" : s);
 let tauriInvoke = null;
@@ -640,6 +643,23 @@ window.onload = () => {
   initSSE();   // 新增：实时事件推送（轮询保留作兑底）
   if (tauriInvoke) setTimeout(startBackend, 500);
 };
+
+// ============ JS 错误可见化（页面顶部红条；定位 WebView 内静默故障用） ============
+window.onerror = function(msg, src, line, col) {
+  let bar = document.getElementById("jsErrorBar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "jsErrorBar";
+    bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#d64550;color:#fff;padding:6px 10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+    (document.body || document.documentElement).appendChild(bar);
+  }
+  bar.textContent = "JS错误: " + msg + " @" + (src || "").split("/").pop() + ":" + line;
+  return false;
+};
+window.addEventListener("unhandledrejection", function(e) {
+  const bar = document.getElementById("jsErrorBar");
+  if (bar) bar.textContent = "Promise未处理拒绝: " + String(e.reason).slice(0, 120);
+});
 
 // ============ 事件委托（替代内联 onclick；CSP 无 unsafe-inline 也能工作） ============
 function escAttr(s) {
