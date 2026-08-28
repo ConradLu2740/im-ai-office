@@ -83,6 +83,12 @@ python main.py
 
 ### 4. 联调 OpenIM（单独部署）
 
+> ⚠️ 旧架构容器组（oim-webhook / ai-agent / board-api / reminder）已于 2026-08-28 下线，
+> compose 中标记为 `profiles: ["legacy"]`，默认不再启动；需要考古时
+> `docker compose --profile legacy up -d <服务名>`。
+
+
+
 OpenIM 用官方方式单独部署（服务端全家桶较重），把你部署的 OpenIM 回调 URL 指向 `oim-webhook`：
 
 - OpenIM 回调配置：开启 `afterSendSingleMsg` / `afterSendGroupMsg` 等消息事件，回调地址填 `http://<oim-webhook>:8100/callback`
