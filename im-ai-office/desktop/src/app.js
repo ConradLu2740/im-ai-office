@@ -11,7 +11,31 @@ let currentUser = null;
 let currentToken = null;
 let currentConversation = null;
 
-async function api(path, opts = {}) {
+let _reloginInFlight = null;
+
+async function _relogin() {
+  // 静默重签 token（/openim/login 当前无口令）；单飞防并发重放。
+  // 若未来启用 IMAI_LOGIN_PASSWORD，此处会失败 → 调用方回登录页。
+  if (!currentUser) return false;
+  if (!_reloginInFlight) {
+    _reloginInFlight = (async () => {
+      try {
+        const res = await _rawApi("/openim/login", { method: "POST", body: JSON.stringify({ user_id: currentUser }) });
+        if (res && res.ok && res.token) {
+          currentToken = res.token;
+          localStorage.setItem("imai_token", res.token);
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    })();
+  }
+  const ok = await _reloginInFlight;
+  _reloginInFlight = null;
+  return ok;
+}
+
+async function _rawApi(path, opts = {}) {
   const method = (opts.method || "GET").toUpperCase();
   let body = undefined;
   if (opts.body) {
@@ -33,6 +57,52 @@ async function api(path, opts = {}) {
   return await res.json();
 }
 
+async function api(path, opts = {}, _retried = false) {
+  let res;
+  try {
+    res = await _rawApi(path, opts);
+  } catch (e) {
+    // 网络层失败且疑似登录态问题：重签一次再试
+    if (!_retried && currentUser && /token|登录|auth/i.test(String(e))) {
+      if (await _relogin()) return api(path, opts, true);
+    }
+    throw e;
+  }
+  // 业务层失败且疑似 token 失效：静默重签后重试原请求一次
+  if (!_retried && res && res.ok === false && /token/i.test(res.error || "")) {
+    if (await _relogin()) return api(path, opts, true);
+  }
+  return res;
+}
+
+function showToast(msg, ok = true) {
+  let box = document.getElementById("toastBox");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toastBox";
+    box.style.cssText = "position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:99998;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;";
+    document.body.appendChild(box);
+  }
+  const t = document.createElement("div");
+  t.style.cssText = `background:${ok ? "#1a9e6c" : "#d64550"};color:#fff;padding:8px 16px;border-radius:10px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:0;transition:opacity .2s;max-width:70vw;`;
+  t.textContent = msg;
+  box.appendChild(t);
+  requestAnimationFrame(() => { t.style.opacity = "1"; });
+  setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 260); }, 2200);
+}
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d)) return String(ts).replace("T", " ").slice(5, 16);
+  const now = new Date();
+  const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return hm;
+  if (d.toDateString() === yest.toDateString()) return "昨天 " + hm;
+  return String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + " " + hm;
+}
+
 function logDebug(info) {
   const card = document.createElement("div");
   card.className = "ai-card";
@@ -46,7 +116,7 @@ function setBackendStatus(ok, text) {
 }
 
 async function startBackend() {
-  if (!tauriInvoke) return alert("当前不是桌面应用环境");
+  if (!tauriInvoke) return showToast("当前不是桌面应用环境", false);
   setBackendStatus(false, "正在启动后端...");
   document.getElementById("startBtn").style.display = "none";
   try {
@@ -95,7 +165,7 @@ function swapUser() {
 
 async function doLogin() {
   const user = document.getElementById("loginUser").value.trim();
-  if (!user) return alert("请输入用户ID");
+  if (!user) return showToast("请输入用户ID", false);
   const password = (document.getElementById("loginPassword") || {}).value || "";
   try {
     const res = await api("/openim/login", { method: "POST", body: JSON.stringify({ user_id: user, password }) });
@@ -107,10 +177,10 @@ async function doLogin() {
       enterMainApp();
       initSDK(user, res.token);
     } else {
-      alert("登录失败：" + res.error);
+      showToast("登录失败：" + (res.error || ""), false);
     }
   } catch (e) {
-    alert("登录异常：" + e.message);
+    showToast("登录异常：" + e.message, false);
   }
 }
 
@@ -218,7 +288,7 @@ function renderGWMessage(m) {
   d.className = "msg" + (self ? " self" : "");
   d.innerHTML = `<div class="avatar">${(self ? "我" : sender.slice(0,1))}</div>
     <div><div class="msg-content">${(m.content||"").replace(/\n/g,"<br>")}</div>
-    <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${self ? "你" : sender} ${new Date(m.sendTime||Date.now()).toLocaleTimeString()}</div></div>`;
+    <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${self ? "你" : sender} ${fmtTime(m.sendTime || Date.now())}</div></div>`;
   box.appendChild(d);
   box.scrollTop = box.scrollHeight;
 }
@@ -245,10 +315,10 @@ async function loadConversations() {
       const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
       if (res.ok) { renderConversations(res.conversations || []); return; }
       if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
-      alert("获取会话失败：" + res.error);
+      showToast("获取会话失败：" + (res.error || ""), false);
     } catch (e) {
       if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
-      alert("获取会话异常：" + e.message);
+      showToast("获取会话异常：" + e.message, false);
     }
   }
 }
@@ -264,7 +334,7 @@ function renderConversations(list) {
       <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
     </div>`;
   html += list.map(c => {
-    const name = c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话");
+    const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话"));
     const type = c.conversationType === 3 ? "群" : "单聊";
     return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conversationID)}" data-target-id="${escAttr(c.groupID || c.userID)}" data-name="${escAttr(name)}" data-type="${c.conversationType}">
       <div class="avatar">${name.slice(0,1)}</div>
@@ -302,7 +372,7 @@ async function loadAIMessages() {
       d.className = "msg" + (self ? " self" : "");
       d.innerHTML = `<div class="avatar ${self ? "" : "ai"}">${self ? "我" : "AI"}</div>
         <div><div class="msg-content">${(m.content || "").replace(/\n/g,"<br>")}</div>
-        <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${m.ts || ""}</div></div>`;
+        <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${fmtTime(m.ts)}</div></div>`;
       box.appendChild(d);
     });
     box.scrollTop = box.scrollHeight;
@@ -344,7 +414,7 @@ async function loadMessageHistory(convId) {
       d.className = "msg" + (self ? " self" : "");
       d.innerHTML = `<div class="avatar">${(self ? "我" : (m.sender_name || "?")).slice(0,1)}</div>
         <div><div class="msg-content">${(m.content || "").replace(/\n/g,"<br>")}</div>
-        <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${self ? "你" : (m.sender_name || "")} ${m.ts || ""}</div></div>`;
+        <div class="msg-meta"${self ? ' style="text-align:right;"' : ""}>${self ? "你" : (m.sender_name || "")} ${fmtTime(m.ts)}</div></div>`;
       box.appendChild(d);
     });
     box.scrollTop = box.scrollHeight;
@@ -360,7 +430,7 @@ function toggleSim() {
 async function sendSim() {
   const sender = document.getElementById("simSender").value.trim() || "同事";
   const text = document.getElementById("simText").value.trim();
-  if (!text) return alert("请输入消息内容");
+  if (!text) return showToast("请输入消息内容", false);
   const convId = "sg_simulated";
   try {
     const res = await api("/api/simulate_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender, text, conv_id: convId }) });
@@ -380,10 +450,10 @@ async function sendSim() {
       loadTasks();
       document.getElementById("simText").value = "";
     } else {
-      alert("模拟失败：" + res.error);
+      showToast("模拟失败：" + (res.error || ""), false);
     }
   } catch (e) {
-    alert("模拟异常：" + e.message);
+    showToast("模拟异常：" + e.message, false);
   }
 }
 
@@ -391,7 +461,7 @@ async function sendMsg() {
   const input = document.getElementById("msg");
   const text = input.value.trim();
   if (!text) return;
-  if (!currentConversation) return alert("请先选择一个会话");
+  if (!currentConversation) return showToast("请先选择一个会话", false);
 
   // 本地先渲染
   const msgs = document.getElementById("messages");
@@ -407,13 +477,13 @@ async function sendMsg() {
     try {
       const res = await api("/api/tasks/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender_id: currentUser, choice: text }) });
       if (!res.ok) {
-        alert("确认失败：" + (res.error || res.reason || "无待确认任务"));
+        showToast("确认失败：" + (res.error || res.reason || "无待确认任务"), false);
       } else {
         await loadAIMessages();
         loadTasks();
       }
     } catch (e) {
-      alert("确认异常：" + e.message);
+      showToast("确认异常：" + e.message, false);
     }
     return;
   }
@@ -430,7 +500,7 @@ async function sendMsg() {
     }
     const res = await api("/gw/send", { method: "POST", body: JSON.stringify(payload) });
     if (!res.ok) {
-      alert("发送失败：" + (res.error || "网关未连接"));
+      showToast("发送失败：" + (res.error || "网关未连接"), false);
     } else {
       // 后端 AI 识别
       try {
@@ -442,7 +512,7 @@ async function sendMsg() {
     setTimeout(loadTasks, 1500);
     updateAIUnread();
   } catch (e) {
-    alert("发送异常：" + e.message);
+    showToast("发送异常：" + e.message, false);
   }
 }
 
@@ -548,17 +618,17 @@ async function loadApprovals() {
 async function approveApproval(id) {
   try {
     const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: true }) });
-    alert(r.ok ? "已批准" : "批准失败：" + (r.error || ""));
+    showToast(r.ok ? "已批准" : "批准失败：" + (r.error || ""), r.ok);
     loadApprovals(); loadTasks();
-  } catch (e) { alert("批准异常：" + e.message); }
+  } catch (e) { showToast("批准异常：" + e.message, false); }
 }
 
 async function rejectApproval(id) {
   try {
     const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: false }) });
-    alert(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""));
+    showToast(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""), r.ok);
     loadApprovals();
-  } catch (e) { alert("拒绝异常：" + e.message); }
+  } catch (e) { showToast("拒绝异常：" + e.message, false); }
 }
 
 async function loadMemory() {

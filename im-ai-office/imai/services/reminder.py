@@ -165,7 +165,7 @@ def scan_once(con=None, now=None):
     own_con = con is None
     con = con or get_conn()
     try:
-        backfilled = backfill_pending(con)
+        backfilled = backfill_pending(con, now=now)
 
         c = con.cursor()
         c.execute("SELECT * FROM task WHERE status IN "

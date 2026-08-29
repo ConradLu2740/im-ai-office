@@ -86,15 +86,17 @@ def parse(text, now=None):
     return None
 
 
-def backfill_pending(con):
-    """回填 task.deadline_at 为 NULL 且 deadline 非空的任务。返回回填条数。"""
+def backfill_pending(con, now=None):
+    """回填 task.deadline_at 为 NULL 且 deadline 非空的任务。返回回填条数。
+
+    now 可注入（调度器透传其扫描基准时刻），保证可测确定性。"""
     c = con.cursor()
     c.execute("SELECT id, deadline FROM task WHERE deadline IS NOT NULL AND deadline_at IS NULL")
     rows = c.fetchall()
     n = 0
     for row in rows:
         text = row["deadline"] if not isinstance(row, dict) else row["deadline"]
-        dt = parse(text)
+        dt = parse(text, now=now)
         if dt is not None:
             c.execute("UPDATE task SET deadline_at=? WHERE id=?",
                       (dt.strftime("%Y-%m-%d %H:%M"), row["id"]))

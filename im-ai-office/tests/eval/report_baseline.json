@@ -2,7 +2,7 @@
   "meta": {
     "generated_note": "首轮 AI 质量基线（详见 回归加固Spec.md §5）",
     "hard_total": 20,
-    "hard_pass": 19,
+    "hard_pass": 20,
     "info_observed": 2,
     "f_misfire": 0,
     "quality_line_F_le": 1
@@ -22,7 +22,7 @@
     },
     "D无人认领": {
       "total": 3,
-      "pass": 2
+      "pass": 3
     },
     "F非任务干扰": {
       "total": 5,
@@ -115,22 +115,22 @@
       "id": "D3",
       "category": "D无人认领",
       "text": "库存报表还没人做呢",
-      "result": "fail",
-      "summary": "is_task 期望 True 实得 False"
+      "result": "pass",
+      "summary": "全部命中"
     },
     {
       "id": "E1",
       "category": "E模糊承诺",
       "text": "这个我看看吧",
       "result": "info",
-      "summary": "is_task=False conf=medium mode=none"
+      "summary": "is_task=False conf=low mode=none"
     },
     {
       "id": "E2",
       "category": "E模糊承诺",
       "text": "我回头有空看看这个需求",
       "result": "info",
-      "summary": "is_task=False conf=medium mode=none"
+      "summary": "is_task=True conf=medium mode=self"
     },
     {
       "id": "F1",

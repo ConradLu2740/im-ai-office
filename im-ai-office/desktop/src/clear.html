@@ -1,0 +1,9 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>清理登录态</title></head>
+<body style="font-family:sans-serif;padding:40px;">
+<div id="s">正在清除本站登录态…</div>
+<script>
+try { localStorage.removeItem("imai_user"); localStorage.removeItem("imai_token"); localStorage.clear(); } catch(e) {}
+document.getElementById("s").textContent = "已清除，1 秒后回到登录页";
+setTimeout(() => location.href = "index.html", 1000);
+</script>
+</body></html>
