@@ -28,7 +28,8 @@ def intent_detect(msg, sys_ctx=""):
     system = (
         "你是办公群聊里的任务识别助手。只在消息确实安排/认领任务时 is_task=true。"
         "分清：明确指派(@某人或'你负责')=assigned；主动认领('我来')=self；第三人称指派('让小张跟一下')=third_party；无归属=none。"
-        "不要臆断。输出严格JSON：" + json.dumps(schema, ensure_ascii=False)
+        "指出某项具体工作还没人做/没人负责（如'XX还没人做呢'）也是待认领任务：is_task=true、assign_mode=none。"
+        "纯抱怨或闲聊不是任务；明确否认（'这不是任务'）时 is_task=false。不要臆断。输出严格JSON：" + json.dumps(schema, ensure_ascii=False)
     )
     if sys_ctx:
         system += "\n" + sys_ctx
