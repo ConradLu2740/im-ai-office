@@ -525,10 +525,29 @@ async function sendMsg() {
 }
 
 // ============ 看板 ============
+let editingTaskId = null; // 迭代2 B1：正在内联编辑的任务 id
+
 function renderTaskCard(t) {
   const confCls = { high: "tag-high", medium: "tag-mid", low: "tag-low" };
   const isPending = t.status === "pending_confirmation";
+  const isConfirmed = t.status === "confirmed";
   const proofs = (t.proofs || []).map(p => `${p.term}=${p.meaning || ""}`).slice(0, 2);
+  let editHtml = "";
+  if (isConfirmed && editingTaskId === t.id) {
+    const dl = String(t.deadline_at || "").slice(0, 16).replace(" ", "T");
+    editHtml = `<div class="ai-card-btns" style="margin-top:10px;flex-wrap:wrap;gap:6px;">
+      <input id="editAssignee" value="${escAttr(t.assignee || "")}" placeholder="负责人"
+        style="flex:1;min-width:90px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+      <input id="editDeadline" type="datetime-local" value="${escAttr(dl)}"
+        style="padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+      <button class="primary" data-action="saveTaskEdit" data-task-id="${t.id}">保存</button>
+      <button data-action="abortEdit">放弃</button>
+    </div>`;
+  }
+  const confirmedBtns = (isConfirmed && editingTaskId !== t.id) ? `<div class="ai-card-btns" style="margin-top:10px;">
+    <button data-action="editTask" data-task-id="${t.id}">编辑</button>
+    <button class="danger" data-action="cancelTask" data-task-id="${t.id}">取消任务</button>
+  </div>` : "";
   return `
     <div class="task-card">
       <div class="task-card-title">${fmt(t.content)}</div>
@@ -543,6 +562,8 @@ function renderTaskCard(t) {
         <button class="primary" data-action="confirmTask" data-task-id="${t.id}">确认</button>
         <button class="danger" data-action="rejectTask" data-task-id="${t.id}">驳回</button>
       </div>` : ""}
+      ${confirmedBtns}
+      ${editHtml}
     </div>
   `;
 }
@@ -555,6 +576,39 @@ async function confirmTask(id) {
 async function rejectTask(id) {
   await api(`/api/tasks/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "负责人错了" }) });
   loadTasks();
+}
+
+async function saveTaskEdit(id) {
+  const assignee = (document.getElementById("editAssignee").value || "").trim();
+  const dl = document.getElementById("editDeadline").value || ""; // "YYYY-MM-DDTHH:MM"
+  const body = {};
+  if (assignee) body.assignee = assignee;
+  if (dl) body.deadline = dl.replace("T", " ");
+  try {
+    await api(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    editingTaskId = null;
+    loadTasks();
+    showToast("任务已更新" + (body.deadline ? "，提醒已按新时间重算" : ""), true);
+  } catch (e) {
+    showToast("更新失败：" + e.message, false);
+  }
+}
+
+async function cancelTask(id, btn) {
+  // 两步确认：第一次点变「确认取消?」，3 秒内再点才生效（不用阻塞式弹窗）
+  if (btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1";
+    btn.textContent = "确认取消?";
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "取消任务"; }, 3000);
+    return;
+  }
+  try {
+    await api(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
+    loadTasks();
+    showToast("任务已取消", true);
+  } catch (e) {
+    showToast("取消失败：" + e.message, false);
+  }
 }
 
 async function loadTasks() {
@@ -763,6 +817,10 @@ function _dispatchAction(el) {
     case "selectConversation": selectConversation(d.convId, d.targetId, d.name, Number(d.type), el); break;
     case "confirmTask": confirmTask(Number(d.taskId)); break;
     case "rejectTask": rejectTask(Number(d.taskId)); break;
+    case "editTask": editingTaskId = Number(d.taskId); loadTasks(); break;
+    case "abortEdit": editingTaskId = null; loadTasks(); break;
+    case "saveTaskEdit": saveTaskEdit(Number(d.taskId)); break;
+    case "cancelTask": cancelTask(Number(d.taskId), el); break;
     case "approveApproval": approveApproval(Number(d.approvalId)); break;
     case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
     case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;
