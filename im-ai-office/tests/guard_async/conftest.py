@@ -50,9 +50,11 @@ def async_client():
         sent_private.append({"group_id": gid, "user_id": uid, "text": text}) or {"errCode": 0})
 
     saved_mode, saved_url = config.AI_MODE, config.REDIS_URL
+    # 保留 .env 中的密码/主机，仅切换逻辑库号（Windows 本机 Redis 带 requirepass）
+    from urllib.parse import urlparse, urlunparse
+    _p = urlparse(config.REDIS_URL)
+    config.REDIS_URL = urlunparse(_p._replace(path=f"/{REDIS_DB}"))
     config.AI_MODE = "async"
-    config.REDIS_URL = f"redis://127.0.0.1:6379/{REDIS_DB}"
-
     with TestClient(app_module.app) as c:
         c.openim_sends = {"sent_group": sent_group, "sent_private": sent_private}
         yield c
