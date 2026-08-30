@@ -700,12 +700,30 @@ async function loadMemory() {
     const terms = data.memory.terms || [];
     const gm = data.memory.grp_meta;
     let html = "";
+    // 迭代2 B3：手动新增术语入口
+    html += `<div class="memory-block"><div class="memory-block-title">新增术语</div>
+      <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;">
+        <input id="newTerm" placeholder="术语/称呼" style="flex:1;min-width:90px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+        <input id="newTermMeaning" placeholder="含义" style="flex:2;min-width:120px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+        <button class="primary" data-action="addTermUI">添加</button>
+      </div></div>`;
     if (gm && gm.intro) {
       html += `<div class="memory-block"><div class="memory-block-title">群简介</div><div class="memory-term">${esc(gm.intro)}</div></div>`;
     }
     html += `<div class="memory-block"><div class="memory-block-title">术语 / 人称记忆（${terms.length}）</div>`;
     if (terms.length) {
-      html += terms.map(t => `<div class="memory-term"><b>${esc(t.term)}</b> = ${esc(t.meaning)} <span style="color:#8f959e;font-size:11px;">[${esc(t.source)}]</span></div>`).join("");
+      html += terms.map(t => {
+        if (editingTerm === t.term) {
+          return `<div class="memory-term"><b>${esc(t.term)}</b> =
+            <input id="editTermMeaning" value="${escAttr(t.meaning || "")}"
+              style="padding:3px 6px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;width:60%;">
+            <button class="primary" data-action="saveTermEdit" data-term="${escAttr(t.term)}">保存</button>
+            <button data-action="abortTermEdit">放弃</button></div>`;
+        }
+        return `<div class="memory-term"><b>${esc(t.term)}</b> = ${esc(t.meaning)} <span style="color:#8f959e;font-size:11px;">[${esc(t.source)}]</span>
+          <button data-action="editTerm" data-term="${escAttr(t.term)}" style="margin-left:6px;">✎</button>
+          <button class="danger" data-action="deleteTerm" data-term="${escAttr(t.term)}" style="margin-left:2px;">🗑</button></div>`;
+      }).join("");
     } else {
       html += `<div style="color:#8f959e;font-size:12px;">暂无记忆，驳回/纠正会沉淀</div>`;
     }
@@ -713,6 +731,52 @@ async function loadMemory() {
     box.innerHTML = html;
   } catch (e) {
     box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+// ============ 迭代2 B3：术语手动增删改 ============
+let editingTerm = null; // 正在内联编辑释义的术语
+
+async function addTermUI() {
+  const term = (document.getElementById("newTerm").value || "").trim();
+  const meaning = (document.getElementById("newTermMeaning").value || "").trim();
+  if (!term || !meaning) { showToast("术语和含义都要填", false); return; }
+  try {
+    await api("/api/term/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term, meaning }) });
+    loadMemory();
+    showToast("术语已添加", true);
+  } catch (e) {
+    showToast("添加失败：" + e.message, false);
+  }
+}
+
+async function saveTermEdit(term) {
+  const meaning = (document.getElementById("editTermMeaning").value || "").trim();
+  if (!meaning) { showToast("含义不能为空", false); return; }
+  try {
+    await api(`/api/term/${encodeURIComponent(term)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meaning }) });
+    editingTerm = null;
+    loadMemory();
+    showToast("术语已更新", true);
+  } catch (e) {
+    showToast("更新失败：" + e.message, false);
+  }
+}
+
+async function deleteTerm(term, btn) {
+  // 两步确认：第一次点变「确认删除?」，3 秒内再点才生效
+  if (btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1";
+    btn.textContent = "确认删除?";
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "🗑"; }, 3000);
+    return;
+  }
+  try {
+    await api(`/api/term/${encodeURIComponent(term)}`, { method: "DELETE" });
+    loadMemory();
+    showToast("术语已删除", true);
+  } catch (e) {
+    showToast("删除失败：" + e.message, false);
   }
 }
 
@@ -821,6 +885,11 @@ function _dispatchAction(el) {
     case "abortEdit": editingTaskId = null; loadTasks(); break;
     case "saveTaskEdit": saveTaskEdit(Number(d.taskId)); break;
     case "cancelTask": cancelTask(Number(d.taskId), el); break;
+    case "addTermUI": addTermUI(); break;
+    case "editTerm": editingTerm = d.term; loadMemory(); break;
+    case "abortTermEdit": editingTerm = null; loadMemory(); break;
+    case "saveTermEdit": saveTermEdit(d.term); break;
+    case "deleteTerm": deleteTerm(d.term, el); break;
     case "approveApproval": approveApproval(Number(d.approvalId)); break;
     case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
     case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;
