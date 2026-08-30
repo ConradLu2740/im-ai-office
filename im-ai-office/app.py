@@ -8,11 +8,12 @@
 from pathlib import Path
 
 # 时序关键：先注入 .env 再 import imai（LLM_*/DB_FILE 常量在 import 时冻结）
+# DX Spec D2：改为统一引导 imai.boot（load_dotenv + 显式打印存储后端）
 try:
+    import imai.boot  # noqa: F401  # noqa: E402
+except Exception:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
-except Exception:
-    pass
 
 import os                                                     # noqa: E402
 import uvicorn                                                # noqa: E402
