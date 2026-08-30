@@ -22,9 +22,9 @@ MINUTES_SYSTEM = (
 
 
 def _llm():
-    """经 pipeline 的引用调用 llm_chat：测试 conftest patch pipeline.llm_chat 时此处同步生效。"""
-    from imai.services import pipeline
-    return pipeline.llm_chat
+    """LLM 统一经 imai/llm.py 锚点调用（DX Spec D3），测试 patch llm._impl 即生效。"""
+    from imai import llm
+    return llm.get_llm()
 
 
 def _loads(v):
