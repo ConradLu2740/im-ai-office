@@ -208,6 +208,7 @@
         <button class="tab" data-action="tab" data-panel="approval" data-loader="loadApprovals">审批</button>
         <button class="tab" data-action="tab" data-panel="memory" data-loader="loadMemory">记忆</button>
         <button class="tab" data-action="tab" data-panel="summary" data-loader="loadSummary">汇总</button>
+        <button class="tab" data-action="tab" data-panel="minutes" data-loader="loadMinutes">纪要</button>
       </div>
     </div>
 
@@ -248,6 +249,20 @@
         <button data-action="loadSummary">生成</button>
       </div>
       <div id="summaryBox" class="summary-box"></div>
+    </div>
+
+    <div class="board-columns" id="panel-minutes" style="display:none;">
+      <div class="panel-toolbar">
+        <span class="panel-title">会议纪要</span>
+        <button data-action="loadMinutes">刷新</button>
+      </div>
+      <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+        <select id="minutesConv" style="flex:2;min-width:140px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;"></select>
+        <input id="minutesLimit" type="number" value="50" min="1" max="500"
+          style="width:70px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+        <button class="primary" data-action="generateMinutes">生成纪要</button>
+      </div>
+      <div id="minutesList" class="memory-box"></div>
     </div>
   </div>
 </div>

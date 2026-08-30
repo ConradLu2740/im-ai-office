@@ -780,6 +780,73 @@ async function deleteTerm(term, btn) {
   }
 }
 
+// ============ 迭代2 B2：会议纪要 ============
+let _minutesConvs = []; // {id, name} 缓存，供下拉与卡片显示会话名
+
+async function loadMinutes() {
+  // 会话下拉：与左侧会话列表同源（/gw/conversations）
+  try {
+    const res = await api("/gw/conversations", { method: "GET" });
+    if (res.ok) {
+      const arr = Array.isArray(res.conversations) ? res.conversations : ((res.conversations && res.conversations.data) || []);
+      _minutesConvs = arr.map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
+    }
+  } catch (_) {}
+  const sel = document.getElementById("minutesConv");
+  if (sel && _minutesConvs.length) {
+    const cur = sel.value;
+    sel.innerHTML = _minutesConvs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)}</option>`).join("");
+    if (cur && _minutesConvs.some(c => c.id === cur)) sel.value = cur;
+  }
+  // 历史纪要列表
+  const box = document.getElementById("minutesList");
+  try {
+    const data = await api("/api/minutes");
+    const list = data.minutes || [];
+    if (!list.length) {
+      box.innerHTML = `<div style="color:#8f959e;font-size:12px;">还没有纪要，选会话后点「生成纪要」</div>`;
+      return;
+    }
+    const convName = id => { const c = _minutesConvs.find(x => x.id === id); return c ? c.name : id; };
+    box.innerHTML = list.map(m => `
+      <div class="memory-block">
+        <div class="memory-block-title">${esc(m.title)} <span style="color:#8f959e;font-size:11px;">${esc(convName(m.conv_id))} · ${m.msg_count} 条消息 · ${esc(String(m.created_at||"").slice(0,16))}</span></div>
+        <div class="memory-term">${esc(m.summary || "")}</div>
+        ${(m.decisions||[]).length ? `<div class="memory-term"><b>结论</b>：${m.decisions.map(d => esc(d)).join("；")}</div>` : ""}
+        ${(m.action_items||[]).length ? `<div class="memory-term"><b>行动项</b></div>` + m.action_items.map((a, i) =>
+          `<div class="memory-term" style="display:flex;align-items:center;gap:6px;">
+            <span style="flex:1;">· ${esc(a.content)}${a.assignee_hint ? `（${esc(a.assignee_hint)}）` : ""}${a.deadline_hint ? ` [${esc(a.deadline_hint)}]` : ""}</span>
+            <button data-action="minutesToTask" data-mid="${m.id}" data-index="${i}">转任务</button>
+          </div>`).join("") : ""}
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function generateMinutes() {
+  const convId = document.getElementById("minutesConv").value;
+  const limit = Number(document.getElementById("minutesLimit").value) || 50;
+  if (!convId) { showToast("请先选择会话", false); return; }
+  showToast("正在生成纪要…（LLM 需要几秒）", true);
+  try {
+    await api("/api/minutes/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conv_id: convId, limit }) });
+    loadMinutes();
+    showToast("纪要已生成", true);
+  } catch (e) {
+    showToast("生成失败：" + e.message, false);
+  }
+}
+
+async function minutesToTask(mid, index) {
+  try {
+    const r = await api(`/api/minutes/${mid}/task`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index }) });
+    showToast(`已转入看板待确认（任务 #${r.taskId}）`, true);
+  } catch (e) {
+    showToast("转任务失败：" + e.message, false);
+  }
+}
+
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -890,6 +957,9 @@ function _dispatchAction(el) {
     case "abortTermEdit": editingTerm = null; loadMemory(); break;
     case "saveTermEdit": saveTermEdit(d.term); break;
     case "deleteTerm": deleteTerm(d.term, el); break;
+    case "loadMinutes": loadMinutes(); break;
+    case "generateMinutes": generateMinutes(); break;
+    case "minutesToTask": minutesToTask(Number(d.mid), Number(d.index)); break;
     case "approveApproval": approveApproval(Number(d.approvalId)); break;
     case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
     case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;
