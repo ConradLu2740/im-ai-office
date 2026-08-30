@@ -7511,7 +7511,7 @@ function sdkInit() {
           fetch(BACKEND_API + "/api/sdk_message", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sender: item.senderNickname, text: content, conv_id: item.conversationID, send_id: item.sendID })
+            body: JSON.stringify({ sender: item.senderNickname, text: content, conv_id: item.conversationID, send_id: item.sendID, client_msg_id: m.clientMsgID || "" })
           }).then((r) => r.json()).then((res) => {
             if (res && res.ai) console.log("[gw] AI action:", res.ai.action);
           }).catch((e) => console.log("[gw] AI sync err", e));

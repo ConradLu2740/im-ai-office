@@ -132,8 +132,18 @@ def sdk_message(body: dict):
     # 迭代1（缺陷#3）：确定性 msgId 去重
     from imai.services import bus
     msg_id = body.get("msg_id") or bus.deterministic_msg_id(conv_id, sender, text)
+    # SDK 重连重投递防重放：网关附带 clientMsgID，同 ID 已入库视为已处理（永久闸门，
+    # 30 分钟去重窗口覆盖不了长时间后的重连重推，2026-08-30 实证 90 分钟后重放重复建任务）
+    client_msg_id = (body.get("client_msg_id") or "").strip()
     con = get_conn()
     try:
+        if client_msg_id:
+            _c = con.cursor()
+            _c.execute("SELECT 1 FROM message WHERE conv_id=? AND client_msg_id=? LIMIT 1",
+                       (conv_id, client_msg_id))
+            if _c.fetchone():
+                return {"ok": True, "dedup": True, "msg_id": msg_id,
+                        "reason": "client_msg_id_seen"}
         if bus.is_duplicate(con, msg_id):
             from imai.repos import audit_log
             audit_log(con, "entry", "ai_dedup_skip", {"msgId": msg_id, "source": "sdk"})
@@ -143,7 +153,8 @@ def sdk_message(body: dict):
     # 入库（收到的消息 is_self=0）
     con = get_conn()
     try:
-        message_add(con, conv_id, send_id or "sdk_user", sender, text, is_self=0)
+        message_add(con, conv_id, send_id or "sdk_user", sender, text, is_self=0,
+                    client_msg_id=client_msg_id or None)
     finally:
         con.close()
     # async 模式：AI 判定入队（消息本体已同步入库展示）

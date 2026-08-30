@@ -106,8 +106,17 @@ def latest_pending_assignee_by_dm_taskid(con, sender_id):
 
 def message_add(con, conv_id, sender_id, sender_name, content, is_self=0,
                 msg_seq=None, client_msg_id=None, content_type=101):
-    """记录一条消息（自己发或收到的）。返回自增 id。"""
+    """记录一条消息（自己发或收到的）。返回自增 id。
+    幂等：同 conv 内相同 client_msg_id 已存在时直接返回既有 id，
+    防 SDK 重连重投递导致重复入库/重复 AI（2026-08-30 实证）。"""
     c = con.cursor()
+    if client_msg_id:
+        c.execute("SELECT id FROM message WHERE conv_id=? AND client_msg_id=? LIMIT 1",
+                  (conv_id, client_msg_id))
+        row = c.fetchone()
+        if row:
+            con.commit()
+            return row[0]
     c.execute(
         "INSERT INTO message(conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type) VALUES(?,?,?,?,?,?,?,?) RETURNING id",
         (conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type))
