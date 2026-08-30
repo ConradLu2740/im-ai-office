@@ -72,11 +72,12 @@ def get_task_dict(con, task_id):
 
 
 def list_task_dicts(con, status=None):
+    """默认排除 cancelled（迭代2 B1 终态，看板不展示）；status 参数优先。"""
     c = con.cursor()
     if status:
         c.execute("SELECT * FROM task WHERE status=? ORDER BY id DESC", (status,))
     else:
-        c.execute("SELECT * FROM task ORDER BY id DESC")
+        c.execute("SELECT * FROM task WHERE status != 'cancelled' ORDER BY id DESC")
     return _rows(c)
 
 

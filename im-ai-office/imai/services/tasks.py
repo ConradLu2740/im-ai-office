@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""任务状态流转服务（自 core.py:443-503 1:1 迁移）：confirm/reject/list"""
+"""任务状态流转服务（自 core.py:443-503 1:1 迁移）：confirm/reject/list/update"""
 import json
+from datetime import datetime
 
 from imai.config import EVENTS
 from imai.repos import audit_log
+
+CANCELLED = "cancelled"
 
 
 def list_tasks(con, status=None):
@@ -30,6 +33,48 @@ def confirm_task(con, task_id, assignee=None, deadline=None):
               (json.dumps({"taskId": task_id}, ensure_ascii=False),))
     con.commit()
     return True
+
+
+def update_task(con, task_id, assignee=None, deadline=None, cancel=False):
+    """迭代2 B1：已确认任务修改（改负责人/改期/取消）。
+
+    返回 (row, err)；err ∈ task_not_found / bad_deadline / no_changes / None。
+    deadline 变更时清空该任务 reminder_sent（三档提醒按新时间重新起算，Spec §1.2）。
+    每处变更写 audit(action='task_update', detail={field, old, new})。
+    """
+    c = con.cursor()
+    c.execute("SELECT * FROM task WHERE id=?", (task_id,))
+    row = c.fetchone()
+    if not row:
+        return None, "task_not_found"
+    changes = {}
+    if assignee is not None and assignee != row["assignee"]:
+        c.execute("UPDATE task SET assignee=?, updated_at=datetime('now') WHERE id=?",
+                  (assignee, task_id))
+        changes["assignee"] = (row["assignee"], assignee)
+    if deadline is not None:
+        try:
+            dt = datetime.strptime(deadline, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None, "bad_deadline"
+        c.execute("UPDATE task SET deadline=?, deadline_at=?, updated_at=datetime('now') WHERE id=?",
+                  (deadline, dt.strftime("%Y-%m-%d %H:%M"), task_id))
+        changes["deadline"] = (row["deadline"], deadline)
+        c.execute("DELETE FROM reminder_sent WHERE task_id=?", (task_id,))
+    if cancel:
+        c.execute("UPDATE task SET status=?, updated_at=datetime('now') WHERE id=?",
+                  (CANCELLED, task_id))
+        changes["status"] = (row["status"], CANCELLED)
+    con.commit()
+    if not changes:
+        return None, "no_changes"
+    for field, (old, new) in changes.items():
+        audit_log(con, "user", "task_update",
+                  {"taskId": task_id, "field": field, "old": old, "new": new})
+        if field == "deadline":
+            audit_log(con, "user", "reminder_reset", {"taskId": task_id})
+    c.execute("SELECT * FROM task WHERE id=?", (task_id,))
+    return c.fetchone(), None
 
 
 def reject_task(con, task_id, reason="", assignee=None):

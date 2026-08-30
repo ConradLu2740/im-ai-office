@@ -33,6 +33,12 @@ class RejectIn(BaseModel):
     reason: str = ""
 
 
+class TaskUpdateIn(BaseModel):
+    assignee: Optional[str] = None
+    deadline: Optional[str] = None
+    action: Optional[str] = None  # 仅支持 "cancel"
+
+
 class ResolveIn(BaseModel):
     sender_id: str
     choice: str
@@ -195,6 +201,31 @@ def confirm(task_id: int, body: ConfirmIn = None):
     ok = _confirm_task(con, task_id, body.assignee, body.deadline)
     con.close()
     return {"ok": ok}
+
+
+@router.patch("/api/tasks/{task_id}")
+def task_update(task_id: int, body: TaskUpdateIn):
+    """迭代2 B1：已确认任务修改（改负责人/改期重置提醒/取消）。"""
+    from fastapi import HTTPException
+    if body.action not in (None, "cancel"):
+        raise HTTPException(400, "action 仅支持 cancel")
+    if body.assignee is None and body.deadline is None and body.action is None:
+        raise HTTPException(400, "没有任何变更字段")
+    from imai.services.tasks import update_task
+    con = get_conn()
+    try:
+        row, err = update_task(con, task_id, assignee=body.assignee,
+                               deadline=body.deadline, cancel=(body.action == "cancel"))
+        if err == "task_not_found":
+            raise HTTPException(404, "任务不存在")
+        if err == "bad_deadline":
+            raise HTTPException(400, "deadline 格式需为 YYYY-MM-DD HH:MM")
+        if err == "no_changes":
+            raise HTTPException(400, "没有任何变更字段")
+        from imai.repos import get_task_dict
+        return {"ok": True, "task": get_task_dict(con, task_id)}
+    finally:
+        con.close()
 
 
 @router.post("/api/tasks/{task_id}/reject")
