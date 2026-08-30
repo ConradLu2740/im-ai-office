@@ -92,9 +92,11 @@ POST /api/minutes/{id}/task  {index}               → {ok, taskId}    404/400 i
 ```
 
 ### 3.5 验收标准
-- [ ] pytest G7：生成（fake_llm）/列表/详情/转任务/错误分支全绿，存量无回归
-- [ ] 真机：产品群生成一份纪要（真实 LLM），行动项转任务后在看板确认通过
-- [ ] desktop/src/app.js 与 web/app.js 同步；acceptance 12/12
+- [x] pytest G7：生成（fake_llm）/列表/详情/转任务/错误分支全绿（3 用例），存量无回归（89 passed）
+- [x] 真机：sg_meeting_smoke 四条消息 → 真实 LLM 生成纪要（标题/摘要/行动项含李娜、周五前）→ 转任务 #25 → 看板确认通过；冒烟数据已清理
+- [x] desktop/src 与 web/ 同步（app.js + index.html）；acceptance 12/12
+
+> 实施注意（已踩坑）：纪要服务的 LLM 调用必须经 `pipeline.llm_chat` 引用（测试 conftest 只 patch 该入口，直连 provider 会绕过 fake 打真 LLM）；PG 翻译游标下 SQL 里 LIKE 的 `%` 要写成 `%%`。
 
 ## 4. Backlog（本轮不做）
 - **B4 历史消息挖掘**：分批拉历史 + 复用识别 pipeline + 人工确认入库（并入记忆主题）
