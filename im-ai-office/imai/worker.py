@@ -89,7 +89,9 @@ def _consume_loop(r):
         except Exception as e:
             if _stop.is_set():
                 break
-            if "NOGROUP" in str(e):
+            if "NOGROUP" in str(e) or "UNBLOCKED" in str(e):
+                # NOGROUP: group 不存在；UNBLOCKED: 阻塞期间 stream 键被删（如 FLUSHALL）
+                # 两者都需重建 group/stream 后继续（2026-08-30 Windows 部署实测补）
                 try:
                     ensure_group(r)   # 外部 flushdb 后自愈（测试与运维场景）
                 except Exception:

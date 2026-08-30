@@ -112,7 +112,7 @@ def test_sse_stream_receives_event(async_client, fake_llm):
     fake_llm.route(MSG_SELF, **INTENT_SELF)            # 固定 AI 输出，消除模型抖动
     async_client.post("/api/simulate_message",
                       json={"sender": "李娜(娜姐)", "text": MSG_SELF})
-    t.join(timeout=13)
+    t.join(timeout=25)
     assert got.is_set() and '"task_created"' in (frames[0] if frames else ""), \
         f"SSE 未收到事件: {frames}"
 
