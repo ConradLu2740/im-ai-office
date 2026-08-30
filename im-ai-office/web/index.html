@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IMAI办公助手</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #1f2329; }
+  .app { display: flex; height: 100vh; }
+
+  /* 登录页 */
+  .login-page { display: flex; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #1E2761 0%, #3a4db8 100%); }
+  .login-box { background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); width: 360px; }
+  .login-box h1 { font-size: 24px; margin: 0 0 8px; text-align: center; color: #1E2761; }
+  .login-box .sub { text-align: center; color: #5a6482; font-size: 13px; margin-bottom: 24px; }
+  .login-box input { width: 100%; padding: 12px 14px; border: 1px solid #e8eaf0; border-radius: 10px; font-size: 14px; margin-bottom: 12px; outline: none; }
+  .login-box input:focus { border-color: #1E2761; }
+  .login-box button { width: 100%; padding: 12px; background: #1E2761; color: #fff; border: none; border-radius: 10px; font-size: 15px; cursor: pointer; margin-top: 8px; }
+  .login-box button:hover { background: #2a37a0; }
+  .user-switch { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .user-switch label { font-size: 12px; color: #8f959e; white-space: nowrap; }
+  .user-switch select { flex: 1; padding: 10px 12px; border: 1px solid #e8eaf0; border-radius: 10px; font-size: 13px; background: #fff; color: #1E2761; outline: none; cursor: pointer; }
+  .user-switch select:focus { border-color: #1E2761; }
+  .login-box .tip { margin-top: 16px; text-align: center; font-size: 12px; color: #8f959e; }
+
+  /* 左侧导航 */
+  .sidebar { width: 64px; background: #1E2761; display: flex; flex-direction: column; align-items: center; padding: 16px 0; }
+  .logo { width: 36px; height: 36px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; font-weight: bold; color: #1E2761; font-size: 14px; }
+  .nav-item { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.6); margin-bottom: 8px; cursor: pointer; transition: 0.2s; font-size: 20px; }
+  .nav-item:hover, .nav-item.active { background: rgba(255,255,255,0.12); color: #fff; }
+  .nav-bottom { margin-top: auto; }
+
+  /* 会话列表 */
+  .session-list { width: 240px; background: #fff; border-right: 1px solid #e8eaf0; display: flex; flex-direction: column; }
+  .session-header { padding: 16px; border-bottom: 1px solid #f0f1f5; }
+  .session-header h2 { font-size: 18px; margin: 0; }
+  .session-search { padding: 12px 16px; }
+  .session-search input { width: 100%; padding: 8px 12px; border: 1px solid #e8eaf0; border-radius: 8px; font-size: 13px; background: #f7f8fa; }
+  .session { padding: 12px 16px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .session:hover { background: #f7f8fa; }
+  .session.active { background: #eef2fb; }
+  .avatar { width: 40px; height: 40px; border-radius: 10px; background: #1E2761; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500; }
+  .avatar.ai { background: linear-gradient(135deg, #1E2761, #3a4db8); }
+  .session-info { flex: 1; min-width: 0; }
+  .session-title { font-size: 14px; font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-preview { font-size: 12px; color: #8f959e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-meta { text-align: right; }
+  .session-time { font-size: 11px; color: #8f959e; }
+  .badge { display: inline-block; min-width: 18px; height: 18px; line-height: 18px; text-align: center; background: #d64550; color: #fff; border-radius: 9px; font-size: 11px; padding: 0 5px; margin-top: 4px; }
+
+  /* 聊天区 */
+  .chat { flex: 1; display: flex; flex-direction: column; background: #fff; min-width: 0; }
+  .chat-header { padding: 14px 20px; border-bottom: 1px solid #f0f1f5; display: flex; align-items: center; justify-content: space-between; }
+  .chat-title { font-size: 16px; font-weight: 600; }
+  .chat-sub { font-size: 12px; color: #8f959e; margin-top: 2px; }
+  .chat-actions { display: flex; gap: 8px; }
+  .chat-actions button { background: #f2f3f5; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; color: #5a6482; cursor: pointer; }
+  .messages { flex: 1; overflow-y: auto; padding: 20px; background: #f9fafc; }
+  .msg { display: flex; gap: 10px; margin-bottom: 20px; }
+  .msg.self { flex-direction: row-reverse; }
+  .msg.self .msg-content { background: #1E2761; color: #fff; border-radius: 16px 16px 4px 16px; }
+  .msg-content { background: #fff; padding: 12px 14px; border-radius: 16px 16px 16px 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); max-width: 70%; font-size: 14px; line-height: 1.5; }
+  .msg-meta { font-size: 11px; color: #8f959e; margin-top: 4px; padding: 0 4px; }
+  .msg.self .msg-meta { text-align: right; }
+
+  /* AI 卡片 */
+  .ai-card { background: #fff; border: 1px solid #e8eaf0; border-radius: 12px; padding: 16px; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+  .ai-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .ai-icon { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(135deg, #1E2761, #3a4db8); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; }
+  .ai-card-title { font-weight: 600; font-size: 14px; }
+  .ai-card-body { font-size: 13px; color: #5a6482; line-height: 1.6; }
+  .ai-card-body b { color: #1E2761; }
+  .ai-card-btns { display: flex; gap: 8px; margin-top: 12px; }
+  .ai-card-btns button { border: none; padding: 7px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .ai-card-btns .primary { background: #1a9e6c; color: #fff; }
+  .ai-card-btns .secondary { background: #f2f3f5; color: #5a6482; }
+  .ai-card-btns .danger { background: #fae1e3; color: #d64550; }
+
+  /* 输入区 */
+  .input-area { padding: 16px 20px; border-top: 1px solid #f0f1f5; background: #fff; }
+  .sim-area { border-top: 1px solid #f0f1f5; background: #fbfcfe; }
+  .sim-toggle { padding: 8px 20px; font-size: 12px; color: #5a6482; cursor: pointer; user-select: none; }
+  .sim-toggle:hover { color: #1E2761; }
+  .sim-box { padding: 8px 20px 12px; display: flex; gap: 8px; }
+  .sim-input { flex: 1; padding: 7px 10px; border: 1px solid #e8eaf0; border-radius: 8px; font-size: 12px; }
+  .sim-btn { background: #1E2761; color: #fff; border: none; padding: 7px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+  .input-box { display: flex; align-items: flex-end; gap: 10px; background: #f5f6fa; border-radius: 12px; padding: 10px 12px; }
+  .input-box textarea { flex: 1; border: none; background: transparent; resize: none; font-size: 14px; outline: none; min-height: 20px; max-height: 120px; font-family: inherit; }
+  .input-box button { background: #1E2761; color: #fff; border: none; width: 34px; height: 34px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+  /* 右侧看板 */
+  .board { width: 340px; background: #fff; border-left: 1px solid #e8eaf0; display: flex; flex-direction: column; }
+  .board-header { padding: 12px 16px; border-bottom: 1px solid #f0f1f5; }
+  .board-tabs { display: flex; gap: 8px; }
+  .board-tabs .tab { background: #f2f3f5; border: none; padding: 6px 14px; border-radius: 8px; font-size: 13px; color: #5a6482; cursor: pointer; }
+  .board-tabs .tab.active { background: #1E2761; color: #fff; }
+  .board-columns { flex: 1; overflow-y: auto; padding: 16px; }
+  .panel-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .panel-title { font-size: 13px; font-weight: 600; color: #1E2761; }
+  .panel-toolbar button { background: #f2f3f5; border: none; padding: 5px 12px; border-radius: 6px; font-size: 12px; color: #5a6482; cursor: pointer; }
+  .approval-item { background: #f9fafc; border: 1px solid #eef0f4; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .approval-item .a-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .approval-item .a-action { font-weight: 600; font-size: 13px; color: #1E2761; }
+  .approval-item .a-detail { font-size: 12px; color: #5a6482; white-space: pre-wrap; margin-bottom: 10px; }
+  .approval-item .a-btns { display: flex; gap: 8px; }
+  .approval-item .a-btns button { flex: 1; border: none; padding: 7px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .approval-item .a-yes { background: #1a9e6c; color: #fff; }
+  .approval-item .a-no { background: #f2f3f5; color: #5a6482; }
+  .approval-empty { text-align: center; color: #8f959e; font-size: 13px; padding: 32px 0; }
+  .memory-block { margin-bottom: 16px; }
+  .memory-block-title { font-size: 13px; font-weight: 600; color: #5a6482; margin-bottom: 8px; }
+  .memory-term { font-size: 13px; color: #1E2761; margin-bottom: 6px; }
+  .memory-term b { color: #1a9e6c; }
+  .summary-text { font-size: 13px; color: #2a3245; line-height: 1.7; background: #f9fafc; border: 1px solid #eef0f4; border-radius: 10px; padding: 14px; white-space: pre-wrap; }
+  .board-col-title { font-size: 13px; font-weight: 600; color: #5a6482; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .board-col-title span { color: #8f959e; font-weight: normal; }
+  .task-card { background: #f9fafc; border-radius: 10px; padding: 12px; margin-bottom: 8px; border: 1px solid #f0f1f5; }
+  .task-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
+  .task-card-meta { font-size: 11px; color: #8f959e; display: flex; align-items: center; gap: 8px; }
+  .task-proof { font-size: 10px; color: #1a9e6c; margin-top: 6px; line-height: 1.4; }
+  .task-card-meta .tag { padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+  .tag-high { background: #e5f8ef; color: #1a9e6c; }
+  .tag-mid { background: #fff2e2; color: #b2500f; }
+  .tag-low { background: #f0f1f6; color: #5a6482; }
+
+  /* 后端状态 */
+  .backend-status { position: fixed; top: 12px; right: 18px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #5a6482; background: rgba(255,255,255,0.9); padding: 4px 10px; border-radius: 20px; z-index: 100; }
+  .backend-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #d64550; }
+  .backend-status .dot.ok { background: #1a9e6c; }
+  .backend-status button { display: none; padding: 2px 8px; font-size: 11px; border: none; border-radius: 4px; background: #1E2761; color: #fff; cursor: pointer; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div class="login-page" id="loginPage">
+  <div class="login-box">
+    <h1>IMAI办公助手</h1>
+    <div class="sub">AI 赋能的办公协同 IM</div>
+    <input type="text" id="loginUser" placeholder="OpenIM 用户ID（如 user001）" value="user001" />
+    <input type="password" id="loginPwd" placeholder="密码（MVP 阶段任意填）" />
+    <div class="user-switch">
+      <label>常用账号：</label>
+      <select id="quickUser">
+        <option value="user001" selected>user001 · 李娜</option>
+        <option value="user002">user002 · 张敏</option>
+        <option value="user003">user003 · 张伟</option>
+        <option value="__custom__">自定义…</option>
+      </select>
+    </div>
+    <input type="password" id="loginPassword" placeholder="访问口令（可选，视服务端配置）" style="margin-top:6px;" />
+    <button data-action="doLogin">登录</button>
+    <div class="tip">当前仅支持 OpenIM 已有账号登录（imAdmin 是管理账号，不能登录）</div>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div class="app hidden" id="mainApp">
+  <div class="sidebar">
+    <div class="logo">IM</div>
+    <div class="nav-item active" title="消息">💬</div>
+    <div class="nav-item" title="任务">📋</div>
+    <div class="nav-item" title="通讯录">👥</div>
+    <div class="nav-item nav-bottom" title="设置" data-action="logout">⏻</div>
+  </div>
+
+  <div class="session-list">
+    <div class="session-header"><h2>消息</h2><button data-action="loadGatewayConversations" style="margin-left:auto;padding:4px 10px;border:1px solid #e0e3ec;background:#fff;border-radius:8px;cursor:pointer;font-size:12px;color:#5a6482;">刷新</button></div>
+    <div class="session-search"><input type="text" placeholder="搜索会话" /></div>
+    <div id="sessionList"></div>
+  </div>
+
+  <div class="chat">
+    <div class="chat-header">
+      <div>
+        <div class="chat-title" id="chatTitle">选择会话</div>
+        <div class="chat-sub" id="chatSub">点击左侧会话开始聊天</div>
+      </div>
+      <div class="chat-actions">
+        <button data-action="loadTasks">刷新看板</button>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="sim-area">
+      <div class="sim-toggle" data-action="toggleSim">🛠 模拟群消息（测试用）</div>
+      <div class="sim-box" id="simBox" style="display:none;">
+        <input id="simSender" class="sim-input" placeholder="发言人，如 王冰" value="王冰" />
+        <input id="simText" class="sim-input" placeholder="消息内容，如 这次活动我来出物料清单，下周三前" />
+        <button data-action="sendSim" class="sim-btn">发送</button>
+      </div>
+    </div>
+    <div class="input-area">
+      <div class="input-box">
+        <textarea id="msg" rows="1" placeholder="输入消息...（Enter 发送）"></textarea>
+        <button data-action="sendMsg">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="board">
+    <div class="board-header">
+      <div class="board-tabs">
+        <button class="tab active" data-action="tab" data-panel="board">看板</button>
+        <button class="tab" data-action="tab" data-panel="approval" data-loader="loadApprovals">审批</button>
+        <button class="tab" data-action="tab" data-panel="memory" data-loader="loadMemory">记忆</button>
+        <button class="tab" data-action="tab" data-panel="summary" data-loader="loadSummary">汇总</button>
+      </div>
+    </div>
+
+    <div class="board-columns" id="panel-board">
+      <div class="board-col">
+        <div class="board-col-title">待指派 <span id="countPendingAssignee">0</span></div>
+        <div id="listPendingAssignee"></div>
+      </div>
+      <div class="board-col">
+        <div class="board-col-title">待确认 <span id="countPending">0</span></div>
+        <div id="listPending"></div>
+      </div>
+      <div class="board-col">
+        <div class="board-col-title">已确认 <span id="countConfirmed">0</span></div>
+        <div id="listConfirmed"></div>
+      </div>
+    </div>
+
+    <div class="board-columns" id="panel-approval" style="display:none;">
+      <div class="panel-toolbar">
+        <span class="panel-title">待审批（高风险动作）</span>
+        <button data-action="loadApprovals">刷新</button>
+      </div>
+      <div id="approvalList" class="approval-list"></div>
+    </div>
+
+    <div class="board-columns" id="panel-memory" style="display:none;">
+      <div class="panel-toolbar">
+        <span class="panel-title">团队记忆</span>
+        <button data-action="loadMemory">刷新</button>
+      </div>
+      <div id="memoryHtml" class="memory-box"></div>
+    </div>
+
+    <div class="board-columns" id="panel-summary" style="display:none;">
+      <div class="panel-toolbar">
+        <span class="panel-title">今日汇总（未定归属）</span>
+        <button data-action="loadSummary">生成</button>
+      </div>
+      <div id="summaryBox" class="summary-box"></div>
+    </div>
+  </div>
+</div>
+
+<div class="backend-status" id="backendStatus">
+  <span class="dot" id="statusDot"></span>
+  <span id="statusText">后端连接中...</span>
+  <button id="startBtn" data-action="startBackend">启动后端</button>
+  <button id="diagBtn" style="background:#5a6482;" data-action="runDiagnose">诊断</button>
+</div>
+<div class="backend-status" id="sdkStatus" style="top:44px;font-weight:600;">SDK 状态：待初始化</div>
+
+<script src="app.js"></script>
+</body>
+</html>
