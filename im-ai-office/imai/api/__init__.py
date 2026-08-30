@@ -10,10 +10,15 @@ from fastapi.responses import HTMLResponse
 # imai/api/__init__.py → parents[2] = im-ai-office 根（index.html 所在）
 ROOT = Path(__file__).resolve().parents[2]
 INDEX = ROOT / "index.html"
+# 浏览器访问模式的前端目录（web/ = desktop/src 的同源部署副本）
+WEB_DIR = ROOT / "web"
 
 
 def create_app() -> FastAPI:
     """组装应用：中间件、路由、启动任务。"""
+    import json as _json
+    import os as _os
+    from fastapi import Request, Response
     from imai.api import deps
     app = FastAPI(title="对话式 AI 办公 · MVP")
 
@@ -35,10 +40,34 @@ def create_app() -> FastAPI:
     app.include_router(routes_misc.router)
     app.include_router(routes_events.router)
 
+    # 浏览器访问模式：/gw/* 同源反代到消息网关（默认 127.0.0.1:8400），免去跨域
+    GATEWAY_URL = _os.environ.get("IMAI_GATEWAY_URL", "http://127.0.0.1:8400")
+
+    @app.api_route("/gw/{rest:path}", methods=["GET", "POST"])
+    async def gw_proxy(rest: str, request: Request):
+        body = await request.body()
+        import urllib.request as _ur
+        req = _ur.Request(f"{GATEWAY_URL}/gw/{rest}", data=body or None,
+                          headers={"Content-Type": request.headers.get("content-type", "application/json")},
+                          method=request.method)
+        try:
+            with _ur.urlopen(req, timeout=35) as resp:
+                return Response(content=resp.read(), status_code=resp.status,
+                                media_type=resp.headers.get("content-type", "application/json"))
+        except Exception as e:
+            return Response(content=_json.dumps({"ok": False, "error": str(e)}),
+                            status_code=200, media_type="application/json")
+
     @app.get("/", response_class=HTMLResponse)
     def index():
-        html = INDEX.read_text(encoding="utf-8") if INDEX.exists() else "<h1>请创建 index.html</h1>"
+        web_index = WEB_DIR / "index.html"
+        html = (web_index if web_index.exists() else INDEX).read_text(encoding="utf-8")             if (web_index.exists() or INDEX.exists()) else "<h1>请创建 index.html</h1>"
         return HTMLResponse(content=html)
+
+    # 浏览器访问模式：同源挂载前端静态资源（web/ 目录；API 路由优先于挂载）
+    if WEB_DIR.exists():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     @app.on_event("startup")
     def _on_startup():
