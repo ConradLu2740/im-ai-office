@@ -64,7 +64,38 @@ PATCH /api/tasks/{task_id}
 - [x] 生产库实机验证：add/patch/delete 200、重复删 404（旧 PG 库 term 表缺列/缺唯一约束已由 init_db 幂等迁移修复）
 - [x] desktop/src/app.js 与 web/app.js 同步
 
-## 3. Backlog（本轮不做）
+## 3. B2 · 会议纪要（优先级 P0，本轮实施）
+
+### 3.1 问题
+群聊即任务只覆盖单句指派；一段讨论（会前对齐、会后分工）里的结论和分工没人沉淀。
+
+### 3.2 范围
+| 能力 | 行为 |
+|---|---|
+| 生成纪要 | 选会话 + 最近 N 条消息（默认 50）→ LLM 生成 `{title, summary, decisions[], action_items[{content, assignee_hint, deadline_hint}]}`；落 `minutes` 表 + audit `minutes_generated` |
+| 纪要列表/详情 | 新「纪要」面板：历史纪要卡片（标题/摘要/结论），按会话过滤 |
+| 行动项转任务 | 每条 action_item 一键转任务：`pending_confirmation` 进看板走正常确认流，creator=`minutes#{id}`，deadline_hint 原样透传（解析交给现有 backfill） |
+| 会话选择 | 复用网关 `/gw/conversations`（conversationID + showName），与左侧会话列表同源 |
+
+### 3.3 设计决策
+- **同步生成**：用户主动触发、等待结果，不入 worker 队列（消息管道的 async 模式只服务自动识别链路）；LLM 调用复用 `llm_provider.llm_chat`
+- **decisions/action_items 存 JSON 文本**（PG 用 TEXT 非 JSONB）：双方言一致，读取时 json.loads
+- **转任务走 pending_confirmation**：复用确认/驳回/提醒全链路，不另造终态；重复点击会建重复任务，v1 接受（audit 可查）
+- **消息窗口 = 最近 N 条**：不做时间段选择（YAGNI，历史挖掘是 B4）
+
+### 3.4 接口
+```http
+POST /api/minutes/generate  {conv_id, limit?=50}  → {ok, minutes}   400 会话无消息
+GET  /api/minutes?conv_id=                         → {ok, minutes:[...]}
+GET  /api/minutes/{id}                             → {ok, minutes}   404
+POST /api/minutes/{id}/task  {index}               → {ok, taskId}    404/400 index 越界
+```
+
+### 3.5 验收标准
+- [ ] pytest G7：生成（fake_llm）/列表/详情/转任务/错误分支全绿，存量无回归
+- [ ] 真机：产品群生成一份纪要（真实 LLM），行动项转任务后在看板确认通过
+- [ ] desktop/src/app.js 与 web/app.js 同步；acceptance 12/12
+
+## 4. Backlog（本轮不做）
 - **B4 历史消息挖掘**：分批拉历史 + 复用识别 pipeline + 人工确认入库（并入记忆主题）
-- **B2 会议纪要**：历史拉取 + LLM 摘要 pipeline + 纪要→任务二次确认流；B1 落地后单独立 Spec
 - **D3 难例调优**：做 B2 时顺带调 prompt（同一条 pipeline）
