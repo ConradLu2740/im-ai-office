@@ -20,6 +20,7 @@ PG_URL = os.environ.get("IMAI_TEST_PG_URL",
 
 import pytest                                        # noqa: E402
 from imai import db as imai_db                       # noqa: E402
+from imai import llm as llm_anchor                    # noqa: E402
 from imai.services import pipeline                   # noqa: E402
 
 
@@ -79,7 +80,7 @@ def fake_llm(monkeypatch):
                 return json.dumps(merged, ensure_ascii=False)
         return json.dumps({"is_task": False, "confidence": "low"})
 
-    monkeypatch.setattr(pipeline, "llm_chat", _fake)
+    monkeypatch.setattr(llm_anchor, "_impl", _fake)
 
     def route(msg_text, **intent_fields):
         routing[msg_text] = intent_fields

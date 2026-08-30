@@ -3,12 +3,12 @@
 """AI 编排管线服务（自 core.py:328-442 1:1 迁移）：意图判定 → 归属判定 → 落库
 
 意图 prompt/schema、归属三分支、歧义落库分支均逐字保留。
-测试锚点：Guard 的 fake_llm monkeypatch 本模块的 llm_chat 绑定。
+测试锚点：LLM 调用统一走 imai/llm.py 锚点（DX Spec D3），测试 patch llm._impl。
 """
 import json
 
 from imai.config import EVENTS
-from imai.integrations.llm_provider import llm_chat
+from imai import llm
 from imai.repos import (audit_log, distinct_alias_names, find_persons_by_alias,
                         insert_task)
 
@@ -33,7 +33,7 @@ def intent_detect(msg, sys_ctx=""):
     )
     if sys_ctx:
         system += "\n" + sys_ctx
-    raw = llm_chat(system, "判断这条群聊消息是否在安排任务；是则提取内容/负责人/截止：\n消息：" + msg)
+    raw = llm.get_llm()(system, "判断这条群聊消息是否在安排任务；是则提取内容/负责人/截止：\n消息：" + msg)
     try:
         intent = json.loads(raw)
         # 规范化 LLM 输出：is_task 偶发返回字符串 "true"/"false"，统一转布尔，避免下游 `is True` 断言/前端展示不稳定

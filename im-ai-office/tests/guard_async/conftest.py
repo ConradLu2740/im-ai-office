@@ -26,6 +26,7 @@ import pytest                                        # noqa: E402
 from fastapi.testclient import TestClient            # noqa: E402
 
 from imai import config                              # noqa: E402
+from imai import llm as llm_anchor                    # noqa: E402
 from imai.db import get_conn as _get_conn            # noqa: E402
 from imai.db import init_db as _init_db              # noqa: E402
 from imai.services import bus                        # noqa: E402
@@ -98,14 +99,14 @@ def _llm_never_real():
     吃掉后续用例等待窗口 → 偶发超时 + SQLite 锁冲突。
     本 fixture 先装兑底，函数级 fake_llm 在其上覆盖、结束后还原到兑底，
     竞态窗口确定性消除。"""
-    original = pipeline.llm_chat
+    original = llm_anchor._impl
 
     def _fallback(system, user, json_mode=True):
         return json.dumps({"is_task": False, "confidence": "low"})
 
-    pipeline.llm_chat = _fallback
+    llm_anchor._impl = _fallback
     yield
-    pipeline.llm_chat = original
+    llm_anchor._impl = original
 
 
 @pytest.fixture(autouse=True)
@@ -128,7 +129,7 @@ def fake_llm(monkeypatch):
                 return json.dumps(merged, ensure_ascii=False)
         return json.dumps({"is_task": False, "confidence": "low"})
 
-    monkeypatch.setattr(pipeline, "llm_chat", _fake)
+    monkeypatch.setattr(llm_anchor, "_impl", _fake)
 
     def route(msg_text, **intent_fields):
         routing[msg_text] = intent_fields

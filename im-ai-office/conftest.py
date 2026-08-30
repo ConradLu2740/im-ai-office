@@ -34,6 +34,7 @@ os.environ.setdefault("IMAI_REMIND_INTERVAL_SEC", "0")
 import pytest                                    # noqa: E402
 from fastapi.testclient import TestClient        # noqa: E402
 
+from imai import llm as llm_anchor                     # noqa: E402
 from imai.integrations import openim_client as oim_client_mod   # noqa: E402
 from imai.services import pipeline                     # noqa: E402
 from imai.config import EVENTS                         # noqa: E402
@@ -114,7 +115,7 @@ def fake_llm(monkeypatch):
                 return json.dumps(merged, ensure_ascii=False)
         return json.dumps({"is_task": False, "confidence": "low"})
 
-    monkeypatch.setattr(pipeline, "llm_chat", _fake)
+    monkeypatch.setattr(llm_anchor, "_impl", _fake)
 
     def route(msg_text, **intent_fields):
         routing[msg_text] = intent_fields
