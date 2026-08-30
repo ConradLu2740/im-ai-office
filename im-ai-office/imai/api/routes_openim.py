@@ -164,6 +164,7 @@ def handle_openim_callback(payload: dict):
     sender_id = payload.get("sendID") or payload.get("send_id") or ""
     sender_nickname = payload.get("senderNickname") or payload.get("sender_nickname") or sender_id
     content_type = payload.get("contentType") or payload.get("content_type") or 101
+    client_msg_id = payload.get("clientMsgID") or payload.get("client_msg_id") or ""
     content = extract_text_content(payload.get("content", ""))
 
     if not content:
@@ -192,7 +193,16 @@ def handle_openim_callback(payload: dict):
             pass
         con = get_conn()
         try:
-            message_add(con, f"sg_{grp_id}", sender_id, sender_nickname, content_clean, is_self=0)
+            # 永久幂等闸门：同 clientMsgID 已入库 → 另一路径（sdk_message）已处理，跳过 AI
+            # （防 SDK 重连重投递导致重复建任务，2026-08-30 实证）
+            if client_msg_id:
+                _c = con.cursor()
+                _c.execute("SELECT 1 FROM message WHERE conv_id=? AND client_msg_id=? LIMIT 1",
+                           (f"sg_{grp_id}", client_msg_id))
+                if _c.fetchone():
+                    return {"ok": True, "handled": True, "action": "client_msg_id_seen"}
+            message_add(con, f"sg_{grp_id}", sender_id, sender_nickname, content_clean, is_self=0,
+                        client_msg_id=client_msg_id or None)
         finally:
             con.close()
         result = process_message(content, sender_nickname, group_id=grp_id)
