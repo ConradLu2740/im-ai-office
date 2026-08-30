@@ -11,3 +11,8 @@ desktop/src-tauri/target/
 __pycache__/
 *.pyc
 .DS_Store
+im-ai-office/deploy/components/
+im-ai-office/group_payload*.json
+im-ai-office/conv_*.json
+im-ai-office/poll_*.json
+im-ai-office/sdk_*.json
