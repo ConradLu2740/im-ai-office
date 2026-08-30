@@ -1,2 +1,4 @@
 payload*.json
 diag_*.json
+*.err.log
+sync.log
