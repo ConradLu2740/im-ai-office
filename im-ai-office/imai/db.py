@@ -175,6 +175,12 @@ def init_db(db_file=None):
             cur.execute(stmt)
         # 迭代1 补齐：对已存在的旧库幂等补齐（CREATE IF NOT EXISTS 对已存在的表不生效）
         cur.execute("ALTER TABLE task ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ")
+        # 迭代2 B3 补齐：旧 PG 库 term 表缺 source/created_at（实测 2026-08-30 UndefinedColumn）
+        cur.execute("ALTER TABLE term ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'")
+        cur.execute("ALTER TABLE term ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()")
+        # add_term 的 ON CONFLICT(term) 依赖唯一约束；旧库无 → 去重后补唯一索引
+        cur.execute("DELETE FROM term a USING term b WHERE a.id > b.id AND a.term = b.term")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS term_term_uidx ON term(term)")
         cur.execute("SELECT COUNT(*) AS n FROM person")
         if cur.fetchone()["n"] == 0:
             cur.executemany("INSERT INTO person(id, real_name, flower_name, title, group_id) "
