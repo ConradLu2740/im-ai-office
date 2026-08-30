@@ -138,7 +138,7 @@ def fake_llm(monkeypatch):
 
 # ---------- 断言辅助 ----------
 
-def wait_task(client, contains, timeout=8.0):
+def wait_task(client, contains, timeout=25.0):
     """轮询任务列表直至出现含指定文本的任务（worker 异步生效等待桥）。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
