@@ -279,9 +279,16 @@ function renderSessions(convs) {
   box.innerHTML = html;
 }
 
+const _seenMsgIDs = new Set(); // 网关重启/页面重载会重放缓冲消息，按 clientMsgID 去重
+
 function renderGWMessage(m) {
   const box = document.getElementById("messages");
   if (!box) return;
+  const msgKey = m.clientMsgID || "";
+  if (msgKey) {
+    if (_seenMsgIDs.has(msgKey)) return; // 重放缓冲重投递：跳过
+    _seenMsgIDs.add(msgKey);
+  }
   const self = m.sendID === currentUser;
   const sender = m.senderNickname || m.sendID || "未知";
   const d = document.createElement("div");
@@ -409,6 +416,7 @@ async function loadMessageHistory(convId) {
     const box = document.getElementById("messages");
     box.innerHTML = "";
     (res.messages || []).forEach(m => {
+      if (m.client_msg_id) _seenMsgIDs.add(m.client_msg_id);
       const self = m.is_self == 1;
       const d = document.createElement("div");
       d.className = "msg" + (self ? " self" : "");
