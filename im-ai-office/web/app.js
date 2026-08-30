@@ -1,11 +1,7 @@
 window.onerror = function(msg, src, line){
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
 };
-// 同源优先：浏览器访问模式（后端挂载本目录）下 API/网关代理/事件流全部走同源；
-// Tauri 壳内（tauri:// 协议）回退到本机后端地址
-const API_BASE = (location.protocol === "http:" || location.protocol === "https:")
-  ? location.origin
-  : "http://127.0.0.1:8000";
+const API_BASE = "http://127.0.0.1:8000";
 const fmt = (s) => (s == null ? "—" : s);
 let tauriInvoke = null;
 try { tauriInvoke = window.__TAURI__.core.invoke; } catch (e) { tauriInvoke = null; }

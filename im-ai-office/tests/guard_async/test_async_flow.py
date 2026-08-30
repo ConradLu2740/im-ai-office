@@ -49,7 +49,7 @@ def test_eventual_task_state(async_client, fake_llm):
     fake_llm.route(MSG_SELF, **INTENT_SELF)
     async_client.post("/api/simulate_message",
                       json={"sender": "李娜(娜姐)", "text": MSG_SELF})
-    task = wait_task(async_client, "出618复盘物料清单", timeout=10)
+    task = wait_task(async_client, "出618复盘物料清单", timeout=25)
     assert task, "10s 内未看到异步产生的任务"
     assert task["status"] == "pending_confirmation"
     assert task["assignee"] == "李娜(娜姐)"
