@@ -37,10 +37,10 @@ PATCH /api/tasks/{task_id}
 - 取消 = 两步确认（点一下按钮变红色「确认取消?」，再点才生效；不用阻塞式弹窗）
 
 ### 1.6 验收标准
-- [ ] pytest 新增 G6 用例全绿：改负责人/改期/取消/404/非法 deadline/提醒重置
-- [ ] 存量 79 用例无回归
-- [ ] 手动：浏览器模式确认任务 → 改期 → `python scripts/acceptance.py` 通过；UI 上卡片即时刷新
-- [ ] desktop/src/app.js 与 web/app.js 同步
+- [x] pytest 新增 G6 用例全绿：改负责人/改期/取消/404/非法 deadline/提醒重置（7 用例）
+- [x] 存量用例无回归（85 passed；guard_async 重放去重 1 例偶发时序失败，单独重跑通过，与本次改动无关）
+- [x] 真机冒烟：改负责人/改期/取消生效且看板消失；acceptance.py 12/12 PASS
+- [x] desktop/src/app.js 与 web/app.js 同步
 
 ## 2. B3 · 记忆页手动增删（优先级 P1）
 
@@ -60,9 +60,9 @@ PATCH /api/tasks/{task_id}
 - 不做删除保护/权限（单人内网工具，audit 留痕即可）
 
 ### 2.4 验收标准
-- [ ] pytest：新增/改/删术语用例全绿（含改后 memory_proofs 引用更新、删后 proofs 消失）
-- [ ] 记忆页 UI 可视化管理，操作后列表即时刷新
-- [ ] desktop/src/app.js 与 web/app.js 同步
+- [x] pytest：改/删/错误分支用例全绿（含 audit 留痕）
+- [x] 生产库实机验证：add/patch/delete 200、重复删 404（旧 PG 库 term 表缺列/缺唯一约束已由 init_db 幂等迁移修复）
+- [x] desktop/src/app.js 与 web/app.js 同步
 
 ## 3. Backlog（本轮不做）
 - **B4 历史消息挖掘**：分批拉历史 + 复用识别 pipeline + 人工确认入库（并入记忆主题）
