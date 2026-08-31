@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """任务/消息路由（自旧 app.py 1:1 迁移）：chat / simulate / sdk_message / tasks / messages"""
 import json
+import time
 from typing import Optional
 
 from fastapi import APIRouter
@@ -55,7 +56,11 @@ def _extract_text_content(raw):
 @router.post("/api/chat")
 def chat(body: ChatIn):
     """提交一条群消息，跑完整识别/归属/落库链路，返回判定结果。"""
+    _t0 = time.perf_counter()
     result = process_message(body.message, body.sender)
+    from imai.services.pipeline import audit_ai_processed
+    audit_ai_processed(get_conn(), None, result, body.message, "chat",
+                       (time.perf_counter() - _t0) * 1000)
     result["events"] = EVENTS[-3:]  # 最近事件（演示透出）
     return result
 
@@ -112,7 +117,11 @@ def simulate_message(body: dict):
         bus.mark_consumed(get_conn(), msg_id)
         return {"ok": True, "accepted": True, "queued_event": str(eid), "msg_id": msg_id}
     # AI 识别（迭代1 缺陷#4：conv_id 透传，记忆注入覆盖 simulate 路径）
+    _t0 = time.perf_counter()
     ai_result = process_message(text, sender, group_id=conv_id)
+    from imai.services.pipeline import audit_ai_processed
+    audit_ai_processed(get_conn(), msg_id, ai_result, text, "simulate",
+                       (time.perf_counter() - _t0) * 1000)
     bus.mark_consumed(get_conn(), msg_id)
     # 歧义时：写 AI 助手会话
     if ai_result.get("action") == "confirm_assignee":
@@ -172,7 +181,11 @@ def sdk_message(body: dict):
         bus.mark_consumed(get_conn(), msg_id)
         return {"ok": True, "accepted": True, "queued_event": str(eid), "msg_id": msg_id}
     # AI 识别（迭代1 缺陷#4：conv_id 透传，记忆注入覆盖 sdk 路径）
+    _t0 = time.perf_counter()
     ai_result = process_message(text, sender, group_id=conv_id)
+    from imai.services.pipeline import audit_ai_processed
+    audit_ai_processed(get_conn(), msg_id, ai_result, text, "sdk_message",
+                       (time.perf_counter() - _t0) * 1000)
     bus.mark_consumed(get_conn(), msg_id)
     # 歧义时：写 AI 助手会话
     if ai_result.get("action") == "confirm_assignee":

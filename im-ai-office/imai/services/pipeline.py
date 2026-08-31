@@ -125,6 +125,22 @@ def process_message(msg, sender="李娜(娜姐)", group_id=None):
     return base
 
 
+def audit_ai_processed(con, msg_id, result, content, source, latency_ms):
+    """G9：sync 路径统一 ai_processed 审计（格式对齐 worker 路径，source 区分入口）。
+
+    worker 异步路径仍自带同格式审计；本 helper 供所有 sync 调用点使用，
+    保证线上质量统计（识别质量统计Spec）覆盖全部真实流量。
+    """
+    from imai.repos import audit_log
+    audit_log(con, "api", "ai_processed",
+              {"msgId": msg_id,
+               "action": result.get("action"),
+               "taskId": (result.get("task") or {}).get("taskId"),
+               "content": (content or "")[:60],
+               "latency_ms": int(latency_ms),
+               "source": source})
+
+
 def build_sys_ctx_stub(con, group_id):
     """注入上下文构建。原实现在 core.memory 区段——委托 memory 服务保持单一来源。"""
     from imai.services.memory import build_sys_ctx as _real
