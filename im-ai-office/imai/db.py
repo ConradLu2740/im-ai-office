@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS reminder_sent(id BIGSERIAL PRIMARY KEY, task_id INTEG
 CREATE TABLE IF NOT EXISTS minutes(id BIGSERIAL PRIMARY KEY, conv_id TEXT, title TEXT, summary TEXT,
                    decisions TEXT, action_items TEXT, msg_count INTEGER DEFAULT 0,
                    created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS mine_candidate(id BIGSERIAL PRIMARY KEY, conv_id TEXT, kind TEXT,
+                     payload TEXT, evidence TEXT, msg_count INTEGER DEFAULT 0,
+                     status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW(),
+                     decided_at TIMESTAMPTZ, decided_by TEXT);
 """
 
 SEED_PERSONS = [
@@ -215,6 +219,10 @@ def init_db(db_file=None):
     CREATE TABLE IF NOT EXISTS minutes(id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id TEXT, title TEXT, summary TEXT,
                       decisions TEXT, action_items TEXT, msg_count INTEGER DEFAULT 0,
                       created_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS mine_candidate(id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id TEXT, kind TEXT,
+                         payload TEXT, evidence TEXT, msg_count INTEGER DEFAULT 0,
+                         status TEXT DEFAULT 'pending', created_at TEXT DEFAULT (datetime('now')),
+                         decided_at TEXT, decided_by TEXT);
     """)
     c.execute("SELECT COUNT(*) FROM person")
     if c.fetchone()[0] == 0:
