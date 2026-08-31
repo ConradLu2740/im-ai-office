@@ -75,3 +75,81 @@ def test_g9_4_dedup_skip_no_audit(client, fake_llm, db):
     second = client.post("/api/simulate_message", json=body).json()
     assert second.get("dedup") is True
     assert db.query("SELECT COUNT(*) AS n FROM audit WHERE action='ai_processed'")[0]["n"] == 1
+
+
+# ---------- Task 2: quality_report 统计服务 ----------
+
+def _seed_quality(db):
+    """窗口内：4 confirm(3 high+1 medium) + 1 reject(带 reason, high) + 1 歧义 +
+    2 条 ai_processed(100/300ms) + 1 dedup + 1 挂起任务(3天前) + 1 条窗口外记录"""
+    def task(status, confidence, updated=None):
+        db.exec("INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg,"
+                "created_at,updated_at) VALUES('内容','发','接','周五',?,?,'src',"
+                "COALESCE(?,datetime('now')),COALESCE(?,datetime('now')))",
+                (status, confidence, updated, updated))
+
+    def audit(action, detail, ts=None):
+        db.exec("INSERT INTO audit(actor,action,detail,ts) VALUES('api',?,?,"  # noqa: SLF001
+                "COALESCE(?,datetime('now')))", (action, detail, ts))
+
+    for _ in range(3):
+        task("confirmed", "high")
+    task("confirmed", "medium")
+    task("rejected", "high")
+    # 挂起任务：原生 SQL 求值时间表达式（参数绑定会存字面量，见下方 audit 注释）
+    db.exec("INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg,"
+            "created_at,updated_at) VALUES('内容','发','接','周五','pending_confirmation','high',"
+            "'src',datetime('now'),datetime('now','-3 days'))")
+    audit("task_created", '{"taskId":1}', None)
+    audit("confirm", '{"taskId":1}', None)
+    audit("confirm", '{"taskId":2}', None)
+    audit("confirm", '{"taskId":3}', None)
+    audit("confirm", '{"taskId":4}', None)
+    audit("reject", '{"taskId":5,"reason":"不该建"}', None)
+    audit("identify_ambiguous", '{"taskId":9,"candidates":["小张1","小张2"]}', None)
+    audit("ai_processed", '{"latency_ms":100,"action":"task_created"}', None)
+    audit("ai_processed", '{"latency_ms":300,"action":"ignore"}', None)
+    audit("ai_dedup_skip", '{"msgId":"m1"}', None)
+    # 窗口外记录：直接原生 SQL 让 SQLite 求值时间表达式（参数绑定会存字面量）
+    db.exec('INSERT INTO audit(actor,action,detail,ts) VALUES'
+            "('api','ai_processed','{\"latency_ms\":999,\"action\":\"task_created\"}',"
+            "datetime('now','-10 days'))")
+
+
+def test_g9_5_quality_report_numbers(client, db):
+    """核心数字：通过率 0.75 / 驳回原因 / 挂起 / 延迟分位 / 窗口过滤"""
+    from imai.db import get_conn
+    from imai.services.stats import quality_report
+    _seed_quality(db)
+    con = get_conn()
+    r = quality_report(con, days=7)
+    con.close()
+    assert r["totals"]["processed"] == 2          # 窗口外那条不计
+    assert r["totals"]["confirm"] == 4 and r["totals"]["reject"] == 1
+    assert r["totals"]["ambiguous"] == 1
+    assert r["totals"]["dedup_skipped"] == 1
+    assert r["one_pass_rate"] == 0.8  # 4 confirm / (4+1) reject，含 medium 用例
+    assert r["reject_reasons"] == [{"reason": "不该建", "n": 1}]
+    conf = {c["confidence"]: c for c in r["confidence"]}
+    # 置信度校准为全量累计（含挂起任务）：high=3确认+1驳回+1挂起
+    assert conf["high"]["created"] == 5 and conf["high"]["confirm"] == 3 and conf["high"]["reject"] == 1
+    assert conf["medium"]["created"] == 1 and conf["medium"]["confirm"] == 1
+    assert r["latency"]["n"] == 2
+    assert r["latency"]["p50_ms"] == 100 and r["latency"]["p95_ms"] == 300
+    stale = r["pending_stale"]
+    assert len(stale) == 1 and stale[0]["status"] == "pending_confirmation"
+    assert stale[0]["age_hours"] > 48
+
+
+def test_g9_6_quality_report_empty(client, db):
+    """空窗口：全 0、除零安全、one_pass_rate=None"""
+    from imai.services.stats import quality_report
+    from imai.db import get_conn
+    con = get_conn()
+    r = quality_report(con, days=7)
+    con.close()
+    assert r["totals"]["processed"] == 0
+    assert r["one_pass_rate"] is None
+    assert r["reject_reasons"] == []
+    assert r["latency"]["n"] == 0 and r["latency"]["p50_ms"] is None
+    assert r["pending_stale"] == []
