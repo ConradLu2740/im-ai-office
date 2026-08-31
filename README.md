@@ -2,7 +2,15 @@
 
 ![License](https://img.shields.io/badge/license-PolyForm--NC%201.0.0-red)
 
-> 一句话：把你的办公群聊交给一个 AI"数字员工"——它旁听大家聊天，谁说了要干什么活，它记下来、找说话人确认、进看板、到点提醒。人只负责拍板，跟进的事它包了。
+> 一句话：把你的办公群聊交给一个 AI“数字员工”——它旁听大家聊天，谁说了要干什么活，它记下来、找说话人确认、进看板、到点提醒。人只负责拍板，跟进的事它包了。
+
+## What is IMAI?
+
+**IMAI is a conversational AI office assistant built on OpenIM + LLM.** It listens to your team chat, extracts tasks from casual messages ("Xiao Li, send the report by Friday"), asks the sender to confirm, tracks them on a kanban board, and sends due-date reminders — a human-in-the-loop ChatOps workflow bot for small teams (10–50 people). Self-hosted with your own database and your choice of LLM (DeepSeek / any OpenAI-compatible model), so your data never leaves your server.
+
+**Key capabilities:** AI task extraction from group messages · ambiguity resolution via AI DM (which "Zhang" did you mean?) · kanban with overdue alerts · tiered reminders (24h / due-day / overdue) · team memory (terms & nicknames injected into recognition) · RBAC with full audit trail.
+
+**Ideal for:** project-based small teams without a dedicated PM, startups tired of verbal commitments nobody tracks, and privacy-sensitive teams that need private deployment. If your group chat produces 5+ "who should finish what by when" messages a day, this is for you.
 
 ## 一、这是什么
 
