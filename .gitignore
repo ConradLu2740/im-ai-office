@@ -25,3 +25,12 @@ im-ai-office/acceptance_report.json
 
 # Proma session workspace data
 .context/
+
+# 内部产品文档（暂不公开；本地保留）
+/对话式AI办公产品思路.md
+/内部产品规划-一页纸.md
+/技术设计文档.md
+/对话式AI办公产品方案.pptx
+/generated-images/
+/package.json
+/package-lock.json
