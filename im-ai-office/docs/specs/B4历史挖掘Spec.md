@@ -1,6 +1,6 @@
 # B4 历史消息挖掘 Spec（迭代 3）
 
-时间：2026-08-31 ｜ 前置：迭代2 B1/B2/B3 收官、识别质量统计上线 ｜ 来源：迭代2-候选对比 B4（当时决定"视情况并入记忆主题"）
+时间：2026-08-31 ｜ 状态：**已实施收官（2026-08-31，真机验证 + 12/12 验收）** ｜ 前置：迭代2 B1/B2/B3 收官、识别质量统计上线 ｜ 来源：迭代2-候选对比 B4（当时决定"视情况并入记忆主题"）
 
 ## 1. 目标
 
@@ -62,9 +62,9 @@ CREATE TABLE IF NOT EXISTS mine_candidate(
 
 ## 6. 验收标准
 
-- [ ] 造 10 条含"上线=发布到生产"术语、"娜姐=李娜"称呼、1 条明确任务安排的种子消息 → POST run → 三类候选各就位，term/alias/task 表**零变化**
-- [ ] 重复术语第二批被置 duplicate；GET candidates?status=pending 不含 duplicate
-- [ ] accept term 候选 → term 表新增且 source='mined' + audit；accept alias → person 创建/复用 + alias 落库；accept task → 任务 pending_confirmation 可在看板确认
-- [ ] reject 候选 → status=rejected，audit 留痕；对已决候选再 decide → 400
-- [ ] 前端记忆页可跑挖掘/列表/接受/拒绝，desktop 与 web 同步（浏览器预览验证）
-- [ ] guard 全绿 + 全量 pytest 无回归 + acceptance 12/12
+- [x] 造 10 条含"上线=发布到生产"术语、"娜姐=李娜"称呼、1 条明确任务安排的种子消息 → POST run → 三类候选各就位，term/alias/task 表**零变化**（G10-1）
+- [x] 重复术语第二批被置 duplicate；GET candidates?status=pending 不含 duplicate（G10-2）
+- [x] accept term 候选 → term 表新增且 source='mined' + audit；accept alias → person 创建/复用 + alias 落库；accept task → 任务 pending_confirmation 可在看板确认（G10-3）
+- [x] reject 候选 → status=rejected，audit 留痕；对已决候选再 decide → 400（G10-4）
+- [x] 前端记忆页可跑挖掘/列表/接受/拒绝，desktop 与 web 同步（真机验证：挖掘出 8 任务候选，接受→看板出现 mine# 任务，拒绝两步确认生效）
+- [x] guard 全绿 + 全量 pytest 无回归（干净环境 104 passed） + acceptance 12/12（2026-08-31）
