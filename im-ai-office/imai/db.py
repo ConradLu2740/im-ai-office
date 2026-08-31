@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS term(id BIGSERIAL PRIMARY KEY, term TEXT UNIQUE NOT N
 CREATE TABLE IF NOT EXISTS grp_meta(oim_group_id TEXT PRIMARY KEY, intro TEXT DEFAULT '', ai_enabled INTEGER DEFAULT 1, updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS event_dedup(msg_id TEXT PRIMARY KEY, consumed_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS reminder_sent(id BIGSERIAL PRIMARY KEY, task_id INTEGER, tier TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(task_id, tier));
+CREATE TABLE IF NOT EXISTS digest_sent(digest_date TEXT PRIMARY KEY, count INTEGER, pushed_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS minutes(id BIGSERIAL PRIMARY KEY, conv_id TEXT, title TEXT, summary TEXT,
                    decisions TEXT, action_items TEXT, msg_count INTEGER DEFAULT 0,
                    created_at TIMESTAMPTZ DEFAULT NOW());
@@ -216,6 +217,7 @@ def init_db(db_file=None):
     CREATE TABLE IF NOT EXISTS grp_meta(oim_group_id TEXT PRIMARY KEY, intro TEXT DEFAULT '', ai_enabled INTEGER DEFAULT 1, updated_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS event_dedup(msg_id TEXT PRIMARY KEY, consumed_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS reminder_sent(id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER, tier TEXT, created_at TEXT DEFAULT (datetime('now')), UNIQUE(task_id, tier));
+    CREATE TABLE IF NOT EXISTS digest_sent(digest_date TEXT PRIMARY KEY, count INTEGER, pushed_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS minutes(id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id TEXT, title TEXT, summary TEXT,
                       decisions TEXT, action_items TEXT, msg_count INTEGER DEFAULT 0,
                       created_at TEXT DEFAULT (datetime('now')));

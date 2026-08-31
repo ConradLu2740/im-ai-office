@@ -10,7 +10,7 @@ import threading
 
 from imai.config import REMIND_INTERVAL_SEC
 from imai.db import get_conn
-from imai.services import reminder
+from imai.services import digest, reminder
 
 _stop = threading.Event()
 _started = threading.Event()
@@ -25,6 +25,10 @@ def _loop():
                 if summary["sent"]:
                     print(f"[scheduler] 发送提醒 {len(summary['sent'])} 条: "
                           f"{[(s['taskId'], s['tier']) for s in summary['sent']]}")
+                # 每日汇总兑底：到点当日首次扫描推送（digest_sent 按日期幂等）
+                d = digest.scan_and_push(con)
+                if d.get("pushed"):
+                    print(f"[scheduler] 每日汇总已推送 {d['count']} 条待确认 → {d['to']}")
             finally:
                 con.close()
         except Exception as e:

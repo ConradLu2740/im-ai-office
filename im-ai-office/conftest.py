@@ -51,7 +51,7 @@ import app as app_module                               # noqa: E402
 
 ALL_TABLES = ("task", "alias", "person", "audit", "ai_dm", "message",
               "role", "approval", "term", "grp_meta", "event_dedup", "reminder_sent",
-              "minutes", "mine_candidate")
+              "minutes", "mine_candidate", "digest_sent")
 
 
 def wipe_and_seed():
