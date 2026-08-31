@@ -45,3 +45,9 @@ UNRESOLVED_STATUS = ("pending_assignee", "pending_confirmation")
 REMIND_INTERVAL_SEC = int(os.environ.get("IMAI_REMIND_INTERVAL_SEC", "60"))
 # 提醒是否回写 OpenIM 群（默认关：防骚扰原则，Spec §1.3）
 REMIND_TO_GROUP = os.environ.get("IMAI_REMIND_TO_GROUP", "0") == "1"
+
+# ============ 每日汇总兑底（M2 收尾） ============
+# 本地时间到达后当日首次扫描即推送（默认 18:00，下班前）
+DIGEST_TIME = os.environ.get("IMAI_DIGEST_TIME", "18:00")
+# role 表无 admin 时的兑底收件人
+DIGEST_FALLBACK_ADMIN = os.environ.get("IMAI_DIGEST_ADMIN", "user001")
