@@ -288,7 +288,16 @@ function renderGWMessage(m) {
   if (msgKey) {
     if (_seenMsgIDs.has(msgKey)) return; // 重放缓冲重投递：跳过
     _seenMsgIDs.add(msgKey);
+  } else {
+    // 旧网关缓冲条目可能无 clientMsgID：按 sendID|内容|时间兕底去重，
+    // 防止重放/多路投递同一条消息在聊天区重复渲染（2026-08-31 实证）
+    const fk = `${m.sendID || ""}|${m.content || ""}|${m.sendTime || 0}`;
+    if (_seenMsgIDs.has(fk)) return;
+    _seenMsgIDs.add(fk);
   }
+  // 会话过滤：带会话 ID 的消息只在对应会话里渲染，防跨会话串场（如群消息串进 AI 助手）
+  if (m.conversationID && currentConversation && currentConversation.id !== m.conversationID) return;
+  if (!m.conversationID && currentConversation && currentConversation.type === 3) return;
   const self = m.sendID === currentUser;
   const sender = m.senderNickname || m.sendID || "未知";
   const d = document.createElement("div");
@@ -506,13 +515,16 @@ async function sendMsg() {
     } else {
       payload.recvID = currentConversation.targetId;
     }
-    const res = await api("/gw/send", { method: "POST", body: JSON.stringify(payload) });
+    // 统一去重键：/gw/send 缓冲与 /api/sdk_message 落库共用同一个 client_msg_id，
+    // 避免轮询渲染与历史加载各画一份（2026-08-31 重复气泡修复）
+    const cmid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(36).slice(2));
+    const res = await api("/gw/send", { method: "POST", body: JSON.stringify({ ...payload, client_msg_id: cmid }) });
     if (!res.ok) {
       showToast("发送失败：" + (res.error || "网关未连接"), false);
     } else {
       // 后端 AI 识别
       try {
-        const aiRes = await api("/api/sdk_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender: currentUser, text, conv_id: currentConversation.id, send_id: currentUser }) });
+        const aiRes = await api("/api/sdk_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender: currentUser, text, conv_id: currentConversation.id, send_id: currentUser, client_msg_id: cmid }) });
         if (aiRes && aiRes.ai) { renderAICard(aiRes.ai); loadTasks(); }
       } catch(e) {}
     }

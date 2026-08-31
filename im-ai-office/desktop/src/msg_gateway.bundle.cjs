@@ -7497,6 +7497,7 @@ function sdkInit() {
         const content = m.textElem?.content || m.content || "";
         const item = {
           seq: ++msgSeq,
+          clientMsgID: m.clientMsgID || "",
           sendID: m.sendID,
           senderNickname: m.senderNickname || m.sendID,
           groupID: m.groupID || "",
@@ -7584,11 +7585,13 @@ var server = http.createServer(async (req, res) => {
     if (path === "/gw/send" && req.method === "POST") {
       const body = await readBody(req);
       if (!sdk || !connected) return json(res, { ok: false, error: "not connected" }, 400);
-      const { groupID, recvID, content } = body;
+      const { groupID, recvID, content, client_msg_id } = body;
       if (!content) return json(res, { ok: false, error: "content required" }, 400);
       const message = (await sdk.createTextMessage(content)).data;
       const resp = await sdk.sendMessage({ recvID: recvID || "", groupID: groupID || "", message });
-      const item = { seq: ++msgSeq, sendID: userID, senderNickname: "\u6211", groupID: groupID || "", conversationID: groupID ? "sg_" + groupID : "", content, sendTime: Date.now() };
+      // 优先用 UI 传入的 client_msg_id：与 /api/sdk_message 落库行共用同一个去重键，
+      // 保证「轮询缓冲」与「历史加载」两条渲染路径能互相去重（2026-08-31）
+      const item = { seq: ++msgSeq, clientMsgID: client_msg_id || message?.clientMsgID || "", sendID: userID, senderNickname: "\u6211", groupID: groupID || "", conversationID: groupID ? "sg_" + groupID : "", content, sendTime: Date.now() };
       msgBuffer.push(item);
       return json(res, { ok: true, serverMsgID: resp?.serverMsgID || "" });
     }
