@@ -36,3 +36,5 @@ im-ai-office/acceptance_report.json
 /package-lock.json
 im-ai-office/交接文档.md
 im-ai-office/测试指南.md
+im-ai-office/docs/specs/交接复盘.md
+im-ai-office/docs/specs/架构分析报告.md
