@@ -539,10 +539,23 @@ async function sendMsg() {
 // ============ 看板 ============
 let editingTaskId = null; // 迭代2 B1：正在内联编辑的任务 id
 
+function parseDeadlineAt(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+function fmtDeadlineDate(d) {
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function renderTaskCard(t) {
   const confCls = { high: "tag-high", medium: "tag-mid", low: "tag-low" };
   const isPending = t.status === "pending_confirmation";
   const isConfirmed = t.status === "confirmed";
+  const dlDate = parseDeadlineAt(t.deadline_at);
+  // 已到截止时间仍未终结（确认中/已确认未取消）→ 逾期标红，看板不再静默堆积僵尸任务
+  const isOverdue = dlDate && dlDate.getTime() < Date.now() && t.status !== "cancelled";
   const proofs = (t.proofs || []).map(p => `${p.term}=${p.meaning || ""}`).slice(0, 2);
   let editHtml = "";
   if (isConfirmed && editingTaskId === t.id) {
@@ -561,12 +574,13 @@ function renderTaskCard(t) {
     <button class="danger" data-action="cancelTask" data-task-id="${t.id}">取消任务</button>
   </div>` : "";
   return `
-    <div class="task-card">
+    <div class="task-card${isOverdue ? " overdue" : ""}">
       <div class="task-card-title">${fmt(t.content)}</div>
       <div class="task-card-meta">
         <span>#${t.id}</span>
         <span>${fmt(t.assignee)}</span>
-        <span>${fmt(t.deadline)}</span>
+        <span${isOverdue ? ' style="color:#d64550;font-weight:600;"' : ""}>${fmt(t.deadline)}${dlDate ? ` · ${fmtDeadlineDate(dlDate)}` : ""}</span>
+        ${isOverdue ? `<span class="tag tag-overdue">已逾期</span>` : ""}
         ${t.confidence ? `<span class="tag ${confCls[t.confidence]||'tag-low'}">${t.confidence}</span>` : ""}
       </div>
       ${proofs.length ? `<div class="task-proof">依据：${esc(proofs.join("；"))}</div>` : ""}
@@ -629,6 +643,9 @@ async function loadTasks() {
     const pendingAssignee = data.tasks.filter(t => t.status === "pending_assignee");
     const pending = data.tasks.filter(t => t.status === "pending_confirmation");
     const confirmed = data.tasks.filter(t => t.status === "confirmed");
+    // 老化排序：越临近/越已过期的待决任务排越前，避免旧任务沉底被遗忘
+    const byDeadline = (a, b) => (parseDeadlineAt(a.deadline_at)?.getTime() ?? Infinity) - (parseDeadlineAt(b.deadline_at)?.getTime() ?? Infinity);
+    pendingAssignee.sort(byDeadline); pending.sort(byDeadline);
     document.getElementById("countPendingAssignee").textContent = pendingAssignee.length;
     document.getElementById("countPending").textContent = pending.length;
     document.getElementById("countConfirmed").textContent = confirmed.length;
@@ -993,6 +1010,14 @@ function initSSE() {
 
 // 初始化
 window.onload = () => {
+  // 调试入口：URL ?debug=1 或 localStorage.imai_debug=1 时才显示「模拟群消息」，普通使用者不可见
+  try {
+    if (new URLSearchParams(location.search).has("debug")) localStorage.setItem("imai_debug", "1");
+    if (localStorage.getItem("imai_debug") === "1") {
+      const st = document.querySelector(".sim-toggle");
+      if (st) st.style.display = "block";
+    }
+  } catch (_) {}
   const savedUser = localStorage.getItem("imai_user");
   const savedToken = localStorage.getItem("imai_token");
   if (savedUser && savedToken) {
