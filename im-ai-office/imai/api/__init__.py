@@ -31,7 +31,7 @@ def create_app() -> FastAPI:
     )
 
     from imai.api import (routes_events, routes_memory, routes_minutes, routes_misc,
-                          routes_openim, routes_rbac, routes_tasks)
+                          routes_openim, routes_rbac, routes_stats, routes_tasks)
 
     app.include_router(routes_tasks.router)
     app.include_router(routes_openim.router)
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_misc.router)
     app.include_router(routes_events.router)
     app.include_router(routes_minutes.router)
+    app.include_router(routes_stats.router)
 
     # 浏览器访问模式：/gw/* 同源反代到消息网关（默认 127.0.0.1:8400），免去跨域
     GATEWAY_URL = _os.environ.get("IMAI_GATEWAY_URL", "http://127.0.0.1:8400")
