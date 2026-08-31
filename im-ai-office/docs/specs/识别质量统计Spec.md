@@ -76,9 +76,15 @@ GET /api/stats/quality?days=7
 - reject reason 是用户原话，周报原文展示即人名也照实出（内网工具，不脱敏；如需外发再议）
 - `/api/chat` 是演示端点，是否计入统计可加 `source` 字段区分（worker 已有 source），守卫用例覆盖
 
+## 7.5 实施期新发现（2026-08-31 真机）
+
+1. **sync 入口共 5 个**：除原计划的 sdk_message/chat 外，simulate_message、openim_send（发送双保险）、openim_callback（回调 sync 分支）同样直调 `process_message`——全部接入 `pipeline.audit_ai_processed`（actor=api，source 区分），比原范围更完整
+2. **生产 PG audit 是旧 schema**：时间列 `created_at`（代码 schema `ts`）、detail JSONB（读出即 dict、不能直接 LIKE）——stats.py 运行时探测列名 + `_loads` 双类型解析 + JSONB `::text` LIKE + PG `%%` 转义，guard_pg 新增 test_pg_stats 锁定
+3. **guard_async AI_MODE 跨层泄漏**：session 级 client 使 async 模式保留到 session 末尾，guard_pg 用例需自行固定 sync（已写入交接文档已知问题 #10）
+
 ## 8. 验收标准
 
-- [ ] sync 路径（sdk_message 同步分支、/api/chat）产生 `ai_processed` 记录，格式与 worker 路径一致（守卫用例）
-- [ ] G 系列新增统计用例全绿：确认通过率/驳回分组/挂起任务/置信度校准/延迟分位；存量无回归
-- [ ] 真机：造 3 confirm + 1 reject（含 reason）→ quality 数字精确对上（one_pass_rate=0.75）
-- [ ] `python scripts/quality_report.py --days 30` 一键输出文本周报
+- [x] sync 全部 5 个入口产生 `ai_processed` 记录，格式与 worker 路径一致（G9.1-G9.4 守卫）
+- [x] G 系列新增统计用例全绿（G9.5-G9.9 + guard_pg/test_pg_stats）：通过率/驳回分组/挂起任务/置信度校准/延迟分位/detail 双类型；全量 92 passed（guard_async 偶发时序失败与本次无关，单独重跑通过）
+- [x] 真机（生产 PG + 真实 LLM）：造 4 任务 → 3 confirm + 1 reject，增量精确对上（confirm+3/reject+1/processed+4），rate 舍入口径一致，驳回原因进周报；测试数据已清理
+- [x] `python scripts/quality_report.py --days 30` 一键输出文本周报（boot 显式报库，幂等 init_db）

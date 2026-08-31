@@ -12,7 +12,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ../domain/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # 2026-08-31：移除 ../domain/schema.sql initdb 挂载（domain/ 已随仓库清理删除；
+      # pgdata 卷已初始化，initdb 脚本本就只在空卷时执行）
     restart: always
     networks:
       - openim

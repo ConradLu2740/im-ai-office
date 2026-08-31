@@ -177,3 +177,12 @@ def test_g9_8_stats_endpoint_bad_days(client):
         assert r.status_code == 400, f"days={bad} 应 400"
     r = client.get("/api/stats/quality", params={"days": "abc"})
     assert r.status_code == 422  # FastAPI 类型校验
+
+
+def test_g9_9_detail_dict_compat():
+    """audit.detail 双类型：PG JSONB 读出即 dict，TEXT 为 JSON 字符串（生产旧库踩坑）"""
+    from imai.services.stats import _loads
+    assert _loads('{"latency_ms":100}') == {"latency_ms": 100}
+    assert _loads({"latency_ms": 100}) == {"latency_ms": 100}   # JSONB dict
+    assert _loads(None) == {}
+    assert _loads("not-json") == {}
