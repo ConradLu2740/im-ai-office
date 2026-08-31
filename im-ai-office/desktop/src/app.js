@@ -729,8 +729,97 @@ async function loadMemory() {
     }
     html += `</div>`;
     box.innerHTML = html;
+    mineRefresh();
   } catch (e) {
     box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+// ============ 迭代3 B4：历史消息挖掘 ============
+
+async function mineRefresh() {
+  // 会话下拉：与纪要页同源缓存（/gw/conversations），空则拉一次
+  if (!_minutesConvs.length) {
+    try {
+      const res = await api("/gw/conversations", { method: "GET" });
+      if (res.ok) {
+        const arr = Array.isArray(res.conversations) ? res.conversations : ((res.conversations && res.conversations.data) || []);
+        _minutesConvs = arr.map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
+      }
+    } catch (_) {}
+  }
+  const sel = document.getElementById("mineConv");
+  if (sel && _minutesConvs.length) {
+    const cur = sel.value;
+    sel.innerHTML = _minutesConvs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)}</option>`).join("");
+    if (cur && _minutesConvs.some(c => c.id === cur)) sel.value = cur;
+  }
+  loadMineCandidates();
+}
+
+function _mineSummary(c) {
+  const p = c.payload || {};
+  if (c.kind === "term") return `术语 <b>${esc(p.term)}</b> = ${esc(p.meaning)}`;
+  if (c.kind === "alias") return `称呼 <b>${esc(p.real_name)}</b> ← ${esc(p.alias)}`;
+  if (c.kind === "task") return `任务 <b>${esc(p.content)}</b>${p.assignee_hint ? `（${esc(p.assignee_hint)}）` : ""}${p.deadline_hint ? ` [${esc(p.deadline_hint)}]` : ""}`;
+  return esc(c.kind);
+}
+
+const _MINE_KIND_LABEL = { term: "术语", alias: "称呼", task: "任务" };
+
+async function loadMineCandidates() {
+  const box = document.getElementById("mineCands");
+  if (!box) return;
+  try {
+    const data = await api("/api/mine/candidates");
+    const list = data.candidates || [];
+    if (!list.length) {
+      box.innerHTML = `<div style="color:#8f959e;font-size:12px;padding:8px;">暂无待确认候选。选会话后点「跑挖掘」</div>`;
+      return;
+    }
+    box.innerHTML = list.map(c => `
+      <div class="memory-term" style="display:flex;align-items:center;gap:6px;">
+        <span style="background:#eef1f6;border-radius:4px;padding:1px 5px;font-size:11px;color:#5a6482;">${_MINE_KIND_LABEL[c.kind] || esc(c.kind)}</span>
+        <span style="flex:1;">${_mineSummary(c)}${c.evidence ? `<br><span style="color:#8f959e;font-size:11px;">原文：${esc(c.evidence)}</span>` : ""}</span>
+        <button class="primary" data-action="decideMine" data-cid="${c.id}" data-do="accept">接受</button>
+        <button class="danger" data-action="decideMine" data-cid="${c.id}" data-do="reject">拒绝</button>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div style="color:#8f959e;font-size:12px;padding:8px;">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function runMining() {
+  const convId = document.getElementById("mineConv").value;
+  const limit = Number(document.getElementById("mineLimit").value) || 500;
+  if (!convId) { showToast("请先选择会话", false); return; }
+  showToast("挖掘中…（LLM 分批处理，可能需要十几秒）", true);
+  try {
+    const r = await api("/api/mine/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conv_id: convId, limit }) });
+    const k = r.by_kind || {};
+    showToast(`挖掘完成：术语 ${k.term || 0} · 称呼 ${k.alias || 0} · 任务 ${k.task || 0}${r.skipped_batches ? `（跳过 ${r.skipped_batches} 批）` : ""}`, true);
+    loadMineCandidates();
+  } catch (e) {
+    showToast("挖掘失败：" + e.message, false);
+  }
+}
+
+async function decideMine(cid, action, btn) {
+  // 两步确认：拒绝需二次点击，防误触
+  if (action === "reject" && btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1"; btn.textContent = "确认拒绝";
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "拒绝"; }, 3000);
+    return;
+  }
+  try {
+    const r = await api(`/api/mine/candidates/${cid}/decide`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+    showToast(action === "accept" ? "已入库" : "已拒绝", true);
+    loadMineCandidates();
+    if (action === "accept" && r.result && r.result.taskId) {
+      showToast(`任务 #${r.result.taskId} 已进看板待确认`, true);
+    }
+  } catch (e) {
+    showToast("操作失败：" + e.message, false);
   }
 }
 
@@ -960,6 +1049,8 @@ function _dispatchAction(el) {
     case "loadMinutes": loadMinutes(); break;
     case "generateMinutes": generateMinutes(); break;
     case "minutesToTask": minutesToTask(Number(d.mid), Number(d.index)); break;
+    case "runMining": runMining(); break;
+    case "decideMine": decideMine(Number(d.cid), d.do, el); break;
     case "approveApproval": approveApproval(Number(d.approvalId)); break;
     case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
     case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;

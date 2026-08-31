@@ -241,6 +241,16 @@
         <button data-action="loadMemory">刷新</button>
       </div>
       <div id="memoryHtml" class="memory-box"></div>
+      <div class="memory-block" style="margin-top:12px;">
+        <div class="memory-block-title">历史挖掘（术语 / 称呼 / 遗漏任务）</div>
+        <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+          <select id="mineConv" style="flex:2;min-width:140px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;"></select>
+          <input id="mineLimit" type="number" value="500" min="1" max="2000"
+            style="width:76px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+          <button class="primary" data-action="runMining">跑挖掘</button>
+        </div>
+        <div id="mineCands" class="memory-box" style="padding:0;"></div>
+      </div>
     </div>
 
     <div class="board-columns" id="panel-summary" style="display:none;">

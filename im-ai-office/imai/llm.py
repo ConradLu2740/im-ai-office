@@ -18,5 +18,6 @@ _impl = _default
 
 
 def get_llm():
-    """返回当前 LLM 调用函数，签名 (system, user, json_mode=True) -> str。"""
+    """返回当前 LLM 调用函数，签名 (system, user, json_mode=True, max_tokens=None) -> str。
+    max_tokens 缺省沿用 provider 默认 1024；推理模型做长文提取/摘要时建议 2048+。"""
     return _impl
