@@ -50,7 +50,11 @@ def create_app() -> FastAPI:
     async def gw_proxy(rest: str, request: Request):
         body = await request.body()
         import urllib.request as _ur
-        req = _ur.Request(f"{GATEWAY_URL}/gw/{rest}", data=body or None,
+        # ⚠️ 必须透传 query string：/gw/poll?since=N 的游标若被丢弃，网关会按 since=0
+        # 每次轮询全量回放 msgBuffer，前端去重又依赖 clientMsgID（旧缓冲条目没有），
+        # 最终表现为聊天区同一消息每 1.5s 重复渲染一条（2026-08-31 实证）。
+        qs = ("?" + request.url.query) if request.url.query else ""
+        req = _ur.Request(f"{GATEWAY_URL}/gw/{rest}{qs}", data=body or None,
                           headers={"Content-Type": request.headers.get("content-type", "application/json")},
                           method=request.method)
         try:
