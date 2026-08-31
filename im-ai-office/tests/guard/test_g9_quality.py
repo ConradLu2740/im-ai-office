@@ -153,3 +153,27 @@ def test_g9_6_quality_report_empty(client, db):
     assert r["reject_reasons"] == []
     assert r["latency"]["n"] == 0 and r["latency"]["p50_ms"] is None
     assert r["pending_stale"] == []
+
+
+# ---------- Task 3: GET /api/stats/quality 端点 ----------
+
+def test_g9_7_stats_endpoint(client, db):
+    """端点透传 quality_report；days 缺省 7"""
+    _seed_quality(db)
+    r = client.get("/api/stats/quality")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ok"] is True and d["window_days"] == 7
+    assert d["totals"]["confirm"] == 4
+    assert d["one_pass_rate"] == 0.8
+    r2 = client.get("/api/stats/quality", params={"days": 30})
+    assert r2.json()["window_days"] == 30
+
+
+def test_g9_8_stats_endpoint_bad_days(client):
+    """days 非法 → 400"""
+    for bad in (0, -1, 366):
+        r = client.get("/api/stats/quality", params={"days": bad})
+        assert r.status_code == 400, f"days={bad} 应 400"
+    r = client.get("/api/stats/quality", params={"days": "abc"})
+    assert r.status_code == 422  # FastAPI 类型校验
