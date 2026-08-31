@@ -16,3 +16,9 @@ im-ai-office/group_payload*.json
 im-ai-office/conv_*.json
 im-ai-office/poll_*.json
 im-ai-office/sdk_*.json
+
+# runtime logs & reports
+im-ai-office/*.log
+im-ai-office/*.err.log
+im-ai-office/diag_*.txt
+im-ai-office/acceptance_report.json
