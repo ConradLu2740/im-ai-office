@@ -48,12 +48,12 @@ def _content_of(data):
         return None
 
 
-def llm_chat(system, user, json_mode=True):
+def llm_chat(system, user, json_mode=True, max_tokens=None):
     payload = {
         "model": LLM_MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "temperature": 0.2,
-        "max_tokens": 1024,
+        "max_tokens": int(max_tokens) if max_tokens else 1024,
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}

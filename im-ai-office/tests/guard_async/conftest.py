@@ -115,7 +115,7 @@ def fake_llm(monkeypatch):
     routing = {}
     calls = []
 
-    def _fake(system, user, json_mode=True):
+    def _fake(system, user, json_mode=True, **_kw):
         calls.append({"system": system, "user": user})
         for frag, resp in routing.items():
             if frag in user:

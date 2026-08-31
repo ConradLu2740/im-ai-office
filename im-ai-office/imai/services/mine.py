@@ -52,7 +52,7 @@ def _dumps(v):
 def _insert_candidate(con, conv_id, kind, payload, evidence, msg_count, status="pending"):
     c = con.cursor()
     c.execute("INSERT INTO mine_candidate(conv_id, kind, payload, evidence, msg_count, status) "
-              "VALUES(?,?,?,?,?,?)",
+              "VALUES(?,?,?,?,?,?) RETURNING id",
               (conv_id, kind, _dumps(payload), evidence, msg_count, status))
     cid = take_id(c)
     con.commit()
@@ -77,7 +77,8 @@ def _extract_batch(con, conv_id, rows, stats):
     lines = [f"【{r['ts']}】{r['sender_name']}：{r['content']}" for r in rows]
     transcript = "\n".join(lines)
     try:
-        data = json.loads(_llm()(MINE_SYSTEM, transcript, json_mode=True))
+        # 推理模型 reasoning_tokens 计入 max_tokens：长 transcript 提取给 4096，防 content 被截空
+        data = json.loads(_llm()(MINE_SYSTEM, transcript, json_mode=True, max_tokens=4096))
     except (ValueError, TypeError):
         stats["skipped_batches"] += 1
         return
