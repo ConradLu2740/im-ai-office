@@ -120,7 +120,12 @@ def openim_send_message(body: dict):
             finally:
                 con.close()
             # 发送成功后，同步做 AI 识别（不依赖 OpenIM 回调，双保险）
+            _t0 = time.perf_counter()
             ai_result = process_message(text, sender_name)
+            from imai.services.pipeline import audit_ai_processed
+            audit_ai_processed(get_conn(), data.get("data", {}).get("serverMsgID"),
+                               ai_result, text, "openim_send",
+                               (time.perf_counter() - _t0) * 1000)
             # 歧义时：写 AI 助手会话 + 发 OpenIM 私聊确认
             if ai_result.get("action") == "confirm_assignee":
                 task = ai_result.get("task", {})
@@ -205,7 +210,11 @@ def handle_openim_callback(payload: dict):
                         client_msg_id=client_msg_id or None)
         finally:
             con.close()
+        _t0 = time.perf_counter()
         result = process_message(content, sender_nickname, group_id=grp_id)
+        from imai.services.pipeline import audit_ai_processed
+        audit_ai_processed(get_conn(), client_msg_id or None, result, content_clean,
+                           "openim_callback", (time.perf_counter() - _t0) * 1000)
         if result.get("action") == "confirm_assignee":
             # 副作用链收敛至 services.actions（溯源标注/ai_dm/OpenIM 私聊/SSE 播报）
             executed = execute_ai_actions(result, sender_id=sender_id, group_id=grp_id,
