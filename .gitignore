@@ -22,3 +22,6 @@ im-ai-office/*.log
 im-ai-office/*.err.log
 im-ai-office/diag_*.txt
 im-ai-office/acceptance_report.json
+
+# Proma session workspace data
+.context/
