@@ -2,3 +2,11 @@ payload*.json
 diag_*.json
 *.err.log
 sync.log
+.pytest_cache/
+conv_*.json
+conv_*.txt
+poll_*.json
+sdk_*.json
+gw_payload*.json
+group_payload*.json
+acceptance_report.json
