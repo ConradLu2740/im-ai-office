@@ -74,6 +74,13 @@ docker compose exec -T postgres psql -U imai -d imai -f /schema.sql
 
 ### 3. 启动 AI 服务
 
+> ⚠️ 本节为旧架构描述。**当前实际启动方式（2026-08-31 起）**：
+> - 开发：`powershell -File scripts\dev.ps1`（uvicorn --reload + 网关 + web 同步监听）
+> - 无头：`python cli.py up / status / down`
+> - 自启开关：`powershell -File scripts\autostart.ps1 -Action enable|disable|status`
+>   （默认 **OFF** 不自启；enable 后注册当前用户登录计划任务「IMAI Autostart」，
+>   由 `scripts/start-silent.ps1` 静默拉起后端+网关，不含 OpenIM server）
+
 ```bash
 # 本地 LLM 之前用云端，配置见 .env（OPENAI_API_KEY 或自建兼容端点）
 cd services/ai-agent
