@@ -424,6 +424,9 @@ async function loadMessageHistory(convId) {
     if (!res.messages || !res.messages.length) return;
     const box = document.getElementById("messages");
     box.innerHTML = "";
+    // 历史整体重建是唯一渲染源：清空去重集合后按 DB 行重建，
+    // 已渲染过的本地回显/轮询气泡会被 innerHTML 清掉，DB 行成为唯一权威（2026-09-01）
+    _seenMsgIDs.clear();
     (res.messages || []).forEach(m => {
       if (m.client_msg_id) _seenMsgIDs.add(m.client_msg_id);
       const self = m.is_self == 1;
@@ -489,6 +492,11 @@ async function sendMsg() {
   msgs.scrollTop = msgs.scrollHeight;
   input.value = "";
 
+  // 去重键提前生成并登记：本地回显占位后，网关轮询缓冲（同 clientMsgID）与
+  // 历史加载（同 client_msg_id）都跳过，修复「发一条弹两条」（2026-09-01）
+  var cmid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(36).slice(2));
+  _seenMsgIDs.add(cmid);
+
   // AI 助手会话：回复数字确认
   if (currentConversation.type === "ai") {
     try {
@@ -517,7 +525,7 @@ async function sendMsg() {
     }
     // 统一去重键：/gw/send 缓冲与 /api/sdk_message 落库共用同一个 client_msg_id，
     // 避免轮询渲染与历史加载各画一份（2026-08-31 重复气泡修复）
-    const cmid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(36).slice(2));
+    // cmid 已在本地回显前生成并登记（2026-09-01），此处复用
     const res = await api("/gw/send", { method: "POST", body: JSON.stringify({ ...payload, client_msg_id: cmid }) });
     if (!res.ok) {
       showToast("发送失败：" + (res.error || "网关未连接"), false);
