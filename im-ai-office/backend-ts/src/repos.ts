@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "./db/drizzle.js";
 import { aiDm, alias, audit, message, person, task, term } from "./db/schema.js";
 
@@ -57,7 +57,7 @@ type TaskSelect = {
   status: typeof task.status; confidence: typeof task.confidence; source_msg: typeof task.sourceMsg;
   pending_meta: typeof task.pendingMeta; created_at: typeof task.createdAt; updated_at: typeof task.updatedAt;
 };
-const TASK_COLS: TaskSelect = {
+export const TASK_COLS: TaskSelect = {
   id: task.id, content: task.content, creator: task.creator,
   assignee: task.assignee, deadline: task.deadline, deadline_at: task.deadlineAt,
   status: task.status, confidence: task.confidence, source_msg: task.sourceMsg,
