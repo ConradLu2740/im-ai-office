@@ -10,3 +10,6 @@ sdk_*.json
 gw_payload*.json
 group_payload*.json
 acceptance_report.json
+diag_*.txt
+poll_*.txt
+*.run.log

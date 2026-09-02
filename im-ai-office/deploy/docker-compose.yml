@@ -265,23 +265,8 @@ services:
     networks:
       - openim
 
-  openim-web-front:
-    image: ${OPENIM_WEB_FRONT_IMAGE}
-    container_name: openim-web-front
-    restart: always
-    ports:
-      - "${OPENIM_WEB_FRONT_PORT}:80"
-    networks:
-      - openim
-
-  openim-admin-front:
-     image: ${OPENIM_ADMIN_FRONT_IMAGE}
-     container_name: openim-admin-front
-     restart: always
-     ports:
-       - "${OPENIM_ADMIN_FRONT_PORT}:80"
-     networks:
-       - openim
+  # openim-web-front / openim-admin-front / openim-chat 已下线（2026-09-02 精简）：
+  # 项目 UI 为自研 web/，不使用官方演示前端；chat 业务服务与本项目无关（交接文档 #6）。
 
   prometheus:
     image: ${PROMETHEUS_IMAGE}
@@ -390,40 +375,6 @@ services:
     networks:
       - openim
 
-  openim-chat:
-    image: ${OPENIM_CHAT_IMAGE}
-    container_name: openim-chat
-    init: true
-    healthcheck:
-      test: ["CMD", "sh", "-c", "mage check"]
-      interval: 5s
-      timeout: 60s
-      retries: 10
-    environment:
-      - CHATENV_MONGODB_ADDRESS=${MONGO_ADDRESS}
-      - CHATENV_MONGODB_USERNAME=${MONGO_USERNAME}
-      - CHATENV_MONGODB_PASSWORD=${MONGO_PASSWORD}
-      - CHATENV_DISCOVERY_ETCD_ADDRESS=${ETCD_ADDRESS}
-      - CHATENV_REDIS_ADDRESS=${REDIS_ADDRESS}
-      - CHATENV_REDIS_PASSWORD=${REDIS_PASSWORD}
-      - CHATENV_SHARE_OPENIM_SECRET=${OPENIM_SECRET}
-      - CHATENV_DISCOVERY_ETCD_USERNAME=${ETCD_USERNAME}
-      - CHATENV_DISCOVERY_ETCD_PASSWORD=${ETCD_PASSWORD}
-      - CHATENV_SHARE_OPENIM_APIURL=${API_URL}
-      - CHATENV_LOG_ISSTDOUT=${LOG_IS_STDOUT}
-      - CHATENV_LOG_REMAINLOGLEVEL=${LOG_LEVEL}
-    ports:
-      - "${CHAT_API_PORT}:10008"
-      - "${ADMIN_API_PORT}:10009"
-    restart: always
-    depends_on:
-      - mongo
-      - redis
-      - etcd
-      - minio
-      - openim-server
-    networks:
-      - openim
 
 volumes:
   pgdata:
