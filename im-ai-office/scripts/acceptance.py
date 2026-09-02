@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 
 import psycopg2
 
-BACKEND = "http://localhost:8000"
+import os
+BACKEND = os.environ.get("IMAI_ACCEPTANCE_BASE", "http://localhost:8000")
 DSN = "postgresql://imai:imai_secret@127.0.0.1:5432/imai"
 CONV = "sg_1591442033"
 SENDER = "张敏(e2e)"

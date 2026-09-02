@@ -13,3 +13,6 @@ acceptance_report.json
 diag_*.txt
 poll_*.txt
 *.run.log
+
+# TS 后端
+backend-ts/node_modules/
