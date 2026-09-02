@@ -1,5 +1,4 @@
 import { config } from "./config.js";
-import { insertReturningId } from "./db.js";
 
 // ============ OpenIM 集成（openim_client.py 的 TS 版；测试可注入 stub 收集器） ============
 
@@ -58,4 +57,3 @@ export async function sendMsgAsUser(payload: {
   return { ok: true, serverMsgId: String(d?.serverMsgID ?? "") };
 }
 
-void insertReturningId;

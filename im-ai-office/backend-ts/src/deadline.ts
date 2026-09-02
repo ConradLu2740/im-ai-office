@@ -1,4 +1,6 @@
-import { query } from "./db.js";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { reminderSent, task as taskT } from "./db/schema.js";
 import { auditLog } from "./repos.js";
 
 // ============ deadline 自然语言解析器（deadline_parser.py 逐字移植；纯规则、零 LLM） ============
@@ -129,20 +131,20 @@ export function parse(text: string | null | undefined, now?: Date): Date | null 
 
 /** 回填 deadline_at；G4：解析失败记一次 deadline_unparsed（reminder_sent 唯一约束去重）。 */
 export async function backfillPending(now?: Date): Promise<number> {
-  const rows = await query<{ id: number; deadline: string }>(
-    "SELECT id, deadline FROM task WHERE deadline IS NOT NULL AND deadline_at IS NULL");
+  const rows = await db.select({ id: taskT.id, deadline: taskT.deadline }).from(taskT)
+    .where(and(isNotNull(taskT.deadline), isNull(taskT.deadlineAt))) as unknown as Array<{ id: number; deadline: string }>;
   let n = 0;
   for (const row of rows) {
     const dt = parse(row.deadline, now);
     if (dt !== null) {
       const pad = (x: number) => String(x).padStart(2, "0");
       const s = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-      await query("UPDATE task SET deadline_at=$1 WHERE id=$2", [s, row.id]);
+      await db.update(taskT).set({ deadlineAt: s }).where(eq(taskT.id, row.id));
       n += 1;
     } else {
-      const r = await query(
-        "INSERT INTO reminder_sent(task_id, tier) VALUES($1, 'deadline_unparsed') ON CONFLICT (task_id, tier) DO NOTHING RETURNING id",
-        [row.id]);
+      const r = await db.insert(reminderSent)
+        .values({ taskId: row.id, tier: "deadline_unparsed" })
+        .onConflictDoNothing().returning({ id: reminderSent.id });
       if (r.length) await auditLog("system", "deadline_unparsed", { taskId: row.id, deadline: row.deadline });
     }
   }

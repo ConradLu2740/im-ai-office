@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { one, query } from "./db.js";
+import { query } from "./db.js";
 import { db } from "./db/drizzle.js";
 
 // ============ 识别质量统计（stats.py 的 TS 版；PG-only） ============
@@ -69,9 +69,9 @@ export async function qualityReport(days = 7): Promise<Record<string, unknown>> 
     taskId: r.id, content: (r.content || "").slice(0, 60), status: r.status, age_hours: Math.round(Number(r.age) * 10) / 10,
   }));
 
-  const cancelRow = await one<{ n: string }>(
-    "SELECT COUNT(*)::text AS n FROM audit WHERE action='task_update' AND detail::text LIKE '%cancelled%' AND ts >= NOW() - ($1 || ' days')::interval",
-    [String(daysInt)]);
+  const cancelRows = await rows<{ n: string }>(
+    sql`SELECT COUNT(*)::text AS n FROM audit WHERE action='task_update' AND detail::text LIKE '%cancelled%' AND ts >= NOW() - INTERVAL ${sql.raw(`'${daysInt} days'`)}`);
+  const cancelRow = cancelRows[0];
 
   return {
     ok: true,
