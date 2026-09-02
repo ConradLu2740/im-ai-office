@@ -157,9 +157,9 @@
   <div class="login-box">
     <h1>IMAI办公助手</h1>
     <div class="sub">AI 赋能的办公协同 IM</div>
-    <input type="text" id="loginUser" placeholder="OpenIM 用户ID（如 user001）" value="user001" />
-    <input type="password" id="loginPwd" placeholder="密码（MVP 阶段任意填）" />
-    <div class="user-switch">
+    <input type="text" id="loginUser" placeholder="用户名（如 lina）" value="lina" />
+    <input type="password" id="loginPwd" placeholder="密码" />
+    <div class="user-switch" style="display:none;">
       <label>常用账号：</label>
       <select id="quickUser">
         <option value="user001" selected>user001 · 李娜</option>
@@ -170,7 +170,7 @@
     </div>
     <input type="password" id="loginPassword" placeholder="访问口令（可选，视服务端配置）" style="margin-top:6px;" />
     <button data-action="doLogin">登录</button>
-    <div class="tip">当前仅支持 OpenIM 已有账号登录（imAdmin 是管理账号，不能登录）</div>
+    <div class="tip">使用管理员分发的用户名与密码登录</div>
   </div>
 </div>
 

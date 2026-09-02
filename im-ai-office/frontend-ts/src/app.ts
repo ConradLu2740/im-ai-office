@@ -105,18 +105,19 @@ function swapUser() {
 
 async function doLogin() {
   const user = document.getElementById("loginUser").value.trim();
-  if (!user) return showToast("请输入用户ID", false);
+  if (!user) return showToast("请输入用户名", false);
   const password = (document.getElementById("loginPassword") || {}).value || "";
   try {
-    const res = await api("/openim/login", { method: "POST", body: JSON.stringify({ user_id: user, password }) });
+    // P3 自建认证：username/password → session token（res.user_id 复用 OpenIM userID）
+    const res = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: user, password }) });
     if (res.ok) {
-      currentUser = user;
+      currentUser = res.user_id;
       currentToken = res.token;
-      apiSetSession(user, res.token);
-      localStorage.setItem("imai_user", user);
+      apiSetSession(res.user_id, res.token);
+      localStorage.setItem("imai_user", res.user_id);
       localStorage.setItem("imai_token", res.token);
       enterMainApp();
-      initSDK(user, res.token);
+      initSDK(res.user_id, res.token);
     } else {
       showToast("登录失败：" + (res.error || ""), false);
     }
