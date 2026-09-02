@@ -48,7 +48,7 @@ AI 全程留痕，关键动作必须人审
 | 后端 | **TypeScript / Hono + Zod** | AI 识别管线、任务/看板/提醒/记忆/权限、REST 代发 + SSE 实时推送（UI 数据面与后端内聚，无独立网关进程） |
 | 数据库 | **PostgreSQL** | 任务、消息、审计、去重、团队记忆 |
 | 大模型 | **OpenAI 兼容接口** | 默认 DeepSeek，Zod Schema 结构化输出 + 验证重试；本地模型只改 provider 配置即可切换 |
-| 前端 | **原生 JS + Tauri 2** | 浏览器直接用，Mac 可打包桌面 App；SSE 收实时事件 |
+| 前端 | **原生 JS（无框架）**，桌面壳 **Tauri 2** | UI 逻辑全是原生 JS；Tauri 的 Rust 层只做桌面壳（拉起后端进程 + HTTP 代理），浏览器模式完全用不到它 |
 
 架构一句话：`OpenIM → Webhook 回调 → Hono/TS 后端(8000，唯一落库+AI 入口) → AI 识别 → 看板/提醒/记忆`；前端收发全走后端 REST + SSE。
 
