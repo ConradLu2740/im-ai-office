@@ -191,22 +191,11 @@ function startSelfHeal() {
 // 群名缓存：REST 会话列表不带 showName，异步解析真实群名后重渲染
 const _groupNameCache = new Map();
 
-async function resolveGroupNames(list) {
-  await Promise.all(list.filter(c => c.conversationType === 3 && c.groupID && !_groupNameCache.has(c.groupID))
-    .map(async c => {
-      try {
-        const r = await api("/openim/group_info", { method: "POST", body: JSON.stringify({ group_id: c.groupID }) });
-        if (r.ok && r.groupName) _groupNameCache.set(c.groupID, r.groupName);
-      } catch (_) {}
-    }));
-  return list.map(c => c.conversationType === 3 && c.groupID && _groupNameCache.has(c.groupID)
-    ? { ...c, showName: _groupNameCache.get(c.groupID) } : c);
-}
+// P3：群名随 /api/conversations 直接返回，旧 resolveGroupNames 已删
 
-function renderConversations(list) {
+function renderConversations(list, unreadMap) {
   const box = document.getElementById("sessionList");
-  // 过滤 AI 系统账号单聊（已有专属「AI 助手」会话，避免重复入口）
-  list = (list || []).filter(c => c.userID !== "imai_assistant");
+  // P3 新契约：list = [{conv_id, group_id, name, last_message, last_sender, last_ts, last_msg_id}]
   let html = `<div class="session" id="aiSession" data-action="selectAISession">
       <div class="avatar ai">AI</div>
       <div class="session-info">
@@ -215,18 +204,16 @@ function renderConversations(list) {
       </div>
       <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
     </div>`;
-  html += list.map(c => {
-    const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话"));
-    const type = c.conversationType === 3 ? 3 : 1;
-    let last = "";
-    try { last = c.latestMsg ? (JSON.parse(c.latestMsg)?.textElem?.content || "") : ""; } catch (_) {}
-    return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conversationID)}" data-target-id="${escAttr(c.groupID || c.userID)}" data-name="${escAttr(name)}" data-type="${type}">
+  html += (list || []).map(c => {
+    const name = c.name || `群 ${c.group_id}`;
+    const unread = (unreadMap || {})[c.conv_id] || 0;
+    return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conv_id)}" data-target-id="${escAttr(c.group_id)}" data-name="${escAttr(name)}" data-type="3">
       <div class="avatar">${name.slice(0,1)}</div>
       <div class="session-info">
         <div class="session-title">${name}</div>
-        <div class="session-preview">${last || "暂无消息"}</div>
+        <div class="session-preview">${c.last_message || "暂无消息"}</div>
       </div>
-      <div class="session-meta">${c.unreadCount ? `<span class="badge">${c.unreadCount}</span>` : ""}</div>
+      <div class="session-meta">${unread ? `<span class="badge">${unread}</span>` : ""}</div>
     </div>`;
   }).join("");
   box.innerHTML = html;
@@ -278,17 +265,18 @@ function enterMainApp() {
 
 // ============ 会话 ============
 async function loadConversations() {
-  // OpenIM 对刚签发 token 偶发抖动（低频 404/空响应），失败自动重试一次
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // P3 自建聊天层：会话列表来自 user_group + message 聚合（不再依赖 OpenIM REST）
+  try {
+    const res = await api("/api/conversations");
+    if (!res.ok) { showToast("获取会话失败：" + (res.error || ""), false); return; }
+    const unreadMap = {};
     try {
-      const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
-      if (res.ok) { renderConversations(await resolveGroupNames(res.conversations || [])); return; }
-      if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
-      showToast("获取会话失败：" + (res.error || ""), false);
-    } catch (e) {
-      if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
-      showToast("获取会话异常：" + e.message, false);
-    }
+      const u = await api("/api/messages/unread");
+      (u.unread || []).forEach(x => { unreadMap[x.conv_id] = x.unread; });
+    } catch (_) {}
+    renderConversations(res.conversations || [], unreadMap);
+  } catch (e) {
+    showToast("获取会话异常：" + e.message, false);
   }
 }
 
@@ -368,6 +356,11 @@ async function loadMessageHistory(convId: string) {
       box.appendChild(d);
     });
     box.scrollTop = box.scrollHeight;
+    // 已读水位上报（最后一条 DB 行 id）
+    const lastRow = (res.messages || [])[res.messages.length - 1];
+    if (lastRow && lastRow.id) {
+      api("/api/messages/read", { method: "POST", body: JSON.stringify({ conv_id: convId, last_msg_id: lastRow.id }) }).catch(() => {});
+    }
   } catch (e) {}
 }
 
@@ -795,12 +788,12 @@ async function loadMemory() {
 // ============ 迭代3 B4：历史消息挖掘 ============
 
 async function mineRefresh() {
-  // 会话下拉：与纪要页同源缓存（后端 REST，网关收敛后替代 /gw/conversations），空则拉一次
+  // 会话下拉：与纪要页同源缓存（P3 自建契约），空则拉一次
   if (!_minutesConvs.length) {
     try {
-      const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
+      const res = await api("/api/conversations");
       if (res.ok) {
-        _minutesConvs = (res.conversations || []).map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
+        _minutesConvs = (res.conversations || []).map(c => ({ id: c.conv_id, name: c.name || `群 ${c.group_id}` }));
       }
     } catch (_) {}
   }
@@ -929,11 +922,11 @@ async function deleteTerm(term, btn) {
 let _minutesConvs = []; // {id, name} 缓存，供下拉与卡片显示会话名
 
 async function loadMinutes() {
-  // 会话下拉：与左侧会话列表同源（后端 REST）
+  // 会话下拉：与左侧会话列表同源（P3 自建契约）
   try {
-    const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
+    const res = await api("/api/conversations");
     if (res.ok) {
-      _minutesConvs = (res.conversations || []).map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
+      _minutesConvs = (res.conversations || []).map(c => ({ id: c.conv_id, name: c.name || `群 ${c.group_id}` }));
     }
   } catch (_) {}
   const sel = document.getElementById("minutesConv");
@@ -1041,18 +1034,24 @@ function initSSE() {
       try {
         const ev = JSON.parse(e.data);
         if (ev.type === "message") {
-          // 回调落库后的实时回声；先按 serverMsgID 配对本地回声（发送响应里登记的 srv: 键）
-          const srvKey = ev.server_msg_id ? "srv:" + ev.server_msg_id : "";
-          if (srvKey && _seenMsgIDs.has(srvKey)) { /* 已有本地回声，不重复渲染 */ }
-          else {
+          // P3：SSE 回声携带 db_id + client_msg_id 双去重键（评审 D3）
+          const dedupKeys = [ev.client_msg_id, ev.db_id ? "db:" + ev.db_id : ""].filter(Boolean);
+          if (dedupKeys.length && dedupKeys.some(k => _seenMsgIDs.has(k))) {
+            // 本地回声/历史已渲染，跳过
+          } else {
+            dedupKeys.forEach(k => _seenMsgIDs.add(k));
             renderGWMessage({
               sendID: ev.send_id,
               senderNickname: ev.sender_nickname,
               content: ev.content,
-              clientMsgID: ev.client_msg_id || ev.server_msg_id,
+              clientMsgID: ev.client_msg_id || (ev.db_id ? "db:" + ev.db_id : ""),
               conversationID: ev.conv_id,
               sendTime: ev.send_time || ev.ts || Date.now(),
             });
+            // 正在看的会话 → 上报已读水位
+            if (currentConversation && ev.conv_id === currentConversation.id && ev.db_id) {
+              api("/api/messages/read", { method: "POST", body: JSON.stringify({ conv_id: ev.conv_id, last_msg_id: ev.db_id }) }).catch(() => {});
+            }
           }
         }
         if (ev.type === "task_created" || ev.type === "ai.card") loadTasks();
@@ -1179,6 +1178,6 @@ if (_quickUser) _quickUser.addEventListener("change", swapUser);
 // ============ 调试句柄（打包后内部函数不再挂 window，供控制台排查/自动化测试使用） ============
 (window as unknown as Record<string, unknown>).IMAI = {
   api, loadConversations, loadTasks, loadSummary, loadRbac, loadMinutes, loadAudit,
-  showPanel, renderConversations, resolveGroupNames, sendMsg,
+  showPanel, renderConversations, sendMsg,
   getUser: () => currentUser, getToken: () => currentToken,
 };
