@@ -41,14 +41,15 @@ def audit_list(limit: int = 30):
 
 @router.get("/api/summary/daily")
 def summary_daily(group_id: Optional[str] = None):
-    """M2 每日汇总兜底：当天未确认归属任务清单（下班前推给群主/管理员）。"""
-    from imai.repos import audit_log
+    """M2 每日汇总兜底：当天未确认归属任务清单（下班前推给群主/管理员）。
+
+    被动查看不写审计（2026-09-02）：此前每次 GET 都落一条 daily_summary，
+    前端汇总 tab 一打开就污染审计流；调度器真实推送走 digest.daily_digest_pushed，
+    那才是需要留痕的关键动作。"""
     from imai.services.memory import build_daily_summary
     con = get_conn()
     try:
         sm = build_daily_summary(con, group_id)
-        # 审计：汇总动作留痕
-        audit_log(con, "system", "daily_summary", sm)
         return {"ok": True, **sm}
     finally:
         con.close()
