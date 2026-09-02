@@ -1,0 +1,12 @@
+{
+  "name": "imai",
+  "private": true,
+  "workspaces": ["backend-ts", "frontend-ts", "electron"],
+  "scripts": {
+    "dev:backend": "npm run dev -w @imai/backend",
+    "dev:frontend": "npm run watch -w @imai/frontend",
+    "build:backend": "npm run build -w @imai/backend",
+    "build:frontend": "npm run build -w @imai/frontend",
+    "test": "npm run test -w @imai/backend"
+  }
+}

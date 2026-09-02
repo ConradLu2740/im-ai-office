@@ -1,5 +1,5 @@
 {
-  "name": "imai-frontend-ts",
+  "name": "@imai/frontend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
