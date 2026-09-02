@@ -1,11 +1,11 @@
 ## 对话式 AI 办公 · MVP 项目骨架
 
-> 内部自用 · 本地部署目标 · MVP 用云端 LLM 跑通 · Python/FastAPI
+> 内部自用 · 本地部署目标 · MVP 用云端 LLM 跑通 · TypeScript/Hono（2026-09-02 全量重写）
 
 ## 架构一句话
 
 ```
-OpenIM(单独部署) --Webhook 回调--> 后端(FastAPI，UI 数据面内聚) --> AI 识别/消歧/确认卡 → 看板/提醒
+OpenIM(单独部署) --Webhook 回调--> 后端(Hono/TS，UI 数据面内聚) --> AI 识别/消歧/确认卡 → 看板/提醒
                                               |
                Postgres/SQLite + Redis + LLM Provider(云端/本地可切换)；前端经 SSE 收实时消息、REST 代发消息（无独立网关进程）
 ```
