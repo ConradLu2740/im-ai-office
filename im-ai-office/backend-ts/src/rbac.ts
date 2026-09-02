@@ -1,4 +1,6 @@
-import { one, query } from "./db.js";
+import { desc, eq, sql } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { approval, role } from "./db/schema.js";
 import { auditLog } from "./repos.js";
 import { HIGH_RISK_ACTIONS } from "./config.js";
 
@@ -6,25 +8,24 @@ import { HIGH_RISK_ACTIONS } from "./config.js";
 
 export async function getRole(oimUserId: string): Promise<string> {
   if (oimUserId === "imAdmin") return "group_admin";
-  const row = await one<{ role: string }>("SELECT role FROM role WHERE oim_user_id=$1", [oimUserId]);
-  return row?.role ?? "member";
+  const rows = await db.select({ role: role.role }).from(role).where(eq(role.oimUserId, oimUserId)).limit(1);
+  return rows[0]?.role ?? "member";
 }
 
-export async function setRole(oimUserId: string, role: string): Promise<void> {
-  if (!["member", "group_admin"].includes(role)) throw new ValueError(`invalid role: ${role}`);
-  await query(
-    "INSERT INTO role(oim_user_id, role) VALUES($1,$2) " +
-    "ON CONFLICT(oim_user_id) DO UPDATE SET role=EXCLUDED.role, updated_at=NOW()",
-    [oimUserId, role]);
-  await auditLog("system", "set_role", { oim_user_id: oimUserId, role });
+export async function setRole(oimUserId: string, newRole: string): Promise<void> {
+  if (!["member", "group_admin"].includes(newRole)) throw new ValueError(`invalid role: ${newRole}`);
+  await db.insert(role)
+    .values({ oimUserId, role: newRole })
+    .onConflictDoUpdate({ target: role.oimUserId, set: { role: newRole, updatedAt: sql`NOW()` } });
+  await auditLog("system", "set_role", { oim_user_id: oimUserId, role: newRole });
 }
 
 class ValueError extends Error {}
 
-export async function canDo(oimUserId: string, action: string, role?: string): Promise<[boolean, string]> {
-  role = role ?? (await getRole(oimUserId));
+export async function canDo(oimUserId: string, action: string, roleOverride?: string): Promise<[boolean, string]> {
+  const r = roleOverride ?? (await getRole(oimUserId));
   if (HIGH_RISK_ACTIONS.has(action)) {
-    if (role === "group_admin") return [true, "admin 允许，直接执行"];
+    if (r === "group_admin") return [true, "admin 允许，直接执行"];
     return [false, "require_approval"];
   }
   if (action === "write_board") return [true, "写看板允许"];
@@ -32,28 +33,35 @@ export async function canDo(oimUserId: string, action: string, role?: string): P
 }
 
 export async function requireApproval(actor: string, action: string, detail?: Record<string, unknown>): Promise<number> {
-  const id = await query<{ id: number }>(
-    "INSERT INTO approval(actor,action,detail,status) VALUES($1,$2,$3,'pending') RETURNING id",
-    [actor, action, detail ? JSON.stringify(detail) : null]);
-  await auditLog(actor, "approval_pending", { approvalId: id[0].id, action, detail });
-  return id[0].id;
+  const rows = await db.insert(approval)
+    .values({ actor, action, detail: detail ? JSON.stringify(detail) : null, status: "pending" })
+    .returning({ id: approval.id });
+  await auditLog(actor, "approval_pending", { approvalId: rows[0].id, action, detail });
+  return rows[0].id;
 }
 
 export async function listApprovals(status = "pending"): Promise<Array<Record<string, unknown>>> {
-  if (status) return query("SELECT * FROM approval WHERE status=$1 ORDER BY id DESC", [status]);
-  return query("SELECT * FROM approval ORDER BY id DESC");
+  const q = db.select().from(approval).$dynamic().orderBy(desc(approval.id));
+  if (status) return q.where(eq(approval.status, status));
+  return q;
 }
 
 export async function listRoles(): Promise<Array<{ oim_user_id: string; role: string; updated_at: string }>> {
-  return query("SELECT oim_user_id, role, updated_at FROM role ORDER BY oim_user_id");
+  return db.select({
+    oim_user_id: role.oimUserId,
+    role: role.role,
+    updated_at: role.updatedAt,
+  }).from(role).orderBy(role.oimUserId) as unknown as Promise<Array<{ oim_user_id: string; role: string; updated_at: string }>>;
 }
 
 export async function decideApproval(approvalId: number, approved: boolean, decidedBy: string): Promise<{ row: Record<string, unknown> | null; detail: Record<string, unknown> | null }> {
   const status = approved ? "approved" : "rejected";
-  const row = await one<Record<string, unknown>>(
-    "UPDATE approval SET status=$1, decided_at=NOW(), decided_by=$2 WHERE id=$3 RETURNING *",
-    [status, decidedBy, approvalId]);
-  if (!row) return { row: null, detail: null };
+  const rows = await db.update(approval)
+    .set({ status, decidedAt: sql`NOW()`, decidedBy })
+    .where(eq(approval.id, approvalId))
+    .returning();
+  if (!rows.length) return { row: null, detail: null };
+  const row = rows[0] as unknown as Record<string, unknown>;
   let detail: Record<string, unknown> | null = null;
   try { detail = typeof row.detail === "string" ? JSON.parse(row.detail) : (row.detail as Record<string, unknown>); } catch { detail = null; }
   await auditLog(decidedBy, approved ? "approval_approved" : "approval_rejected",
