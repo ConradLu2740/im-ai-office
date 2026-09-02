@@ -1,5 +1,9 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, types as pgTypes, type QueryResultRow } from "pg";
 import { config } from "./config.js";
+
+// int8/numeric 以 number 返回（对齐 psycopg2 行为；否则 task.id 变字符串，前端严格比较会翻车）
+pgTypes.setTypeParser(20, (v) => parseInt(v, 10));   // int8
+pgTypes.setTypeParser(1700, (v) => parseFloat(v));   // numeric
 
 // PG-only：双方言税随重写消亡（后端TS重写迁移Spec §1）
 export const pool = new Pool({ connectionString: config.databaseUrl, max: 10 });
@@ -63,6 +67,15 @@ export async function initSchema(): Promise<void> {
     const s = stmt.trim();
     if (s) await pool.query(s);
   }
+  // 幂等补列（生产旧库缺列——本次重写实战踩坑：task 缺 pending_meta 导致歧义流 500）。
+  // 与 Python 版不同：PG 侧也做轻量迁移，不再依赖“老表恰好齐列”。
+  const migrations = [
+    "ALTER TABLE task ADD COLUMN IF NOT EXISTS pending_meta TEXT",
+    "ALTER TABLE message ADD COLUMN IF NOT EXISTS client_msg_id TEXT",
+    "ALTER TABLE ai_dm ADD COLUMN IF NOT EXISTS task_id INTEGER",
+    "ALTER TABLE ai_dm ADD COLUMN IF NOT EXISTS read_flag INTEGER DEFAULT 0",
+  ];
+  for (const m of migrations) await pool.query(m);
   const { rows } = await pool.query<{ n: string }>("SELECT COUNT(*)::text AS n FROM person");
   if (Number(rows[0].n) === 0) {
     for (const [id, real, flower, title, gid] of SEED_PERSONS) {
