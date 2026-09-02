@@ -1,66 +1,80 @@
-import { one, query, insertReturningId } from "./db.js";
-import { auditLog, getTaskDict, latestPendingAssigneeByDmTaskid, latestPendingAssigneeForCreator, type TaskRow } from "./repos.js";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { aiDm, task } from "./db/schema.js";
+import { getTaskDict, latestPendingAssigneeByDmTaskid, latestPendingAssigneeForCreator, type TaskRow } from "./repos.js";
 import { confirmTask, rejectTask } from "./tasks.js";
 
 // ============ AI 助手私聊会话（ai_dm.py 的 TS 版） ============
 
 export async function aiDmSend(senderId: string, text: string, taskId: number | null = null, direction: "in" | "out" = "out"): Promise<number> {
-  return insertReturningId(
-    "INSERT INTO ai_dm(sender_id, direction, content, task_id) VALUES($1,$2,$3,$4) RETURNING id",
-    [senderId, direction, text, taskId]);
+  const rows = await db.insert(aiDm)
+    .values({ senderId, direction, content: text, taskId })
+    .returning({ id: aiDm.id });
+  return rows[0].id;
 }
 
 export async function aiDmList(senderId?: string | null): Promise<Array<Record<string, unknown>>> {
-  if (senderId) return query("SELECT * FROM ai_dm WHERE sender_id=$1 ORDER BY id ASC", [senderId]);
-  return query("SELECT * FROM ai_dm ORDER BY id ASC");
+  const q = db.select().from(aiDm).$dynamic().orderBy(asc(aiDm.id));
+  if (senderId) return q.where(eq(aiDm.senderId, senderId));
+  return q;
 }
 
 export async function aiDmUnreadCount(senderId?: string | null): Promise<number> {
-  const row = senderId
-    ? await one<{ n: string }>("SELECT COUNT(*)::text AS n FROM ai_dm WHERE sender_id=$1 AND direction='in' AND read_flag=0", [senderId])
-    : await one<{ n: string }>("SELECT COUNT(*)::text AS n FROM ai_dm WHERE direction='in' AND read_flag=0");
-  return Number(row?.n ?? 0);
+  const rows = senderId
+    ? await db.select({ n: sql<number>`count(*)::int` }).from(aiDm)
+        .where(and(eq(aiDm.senderId, senderId), eq(aiDm.direction, "in"), eq(aiDm.readFlag, 0)))
+    : await db.select({ n: sql<number>`count(*)::int` }).from(aiDm)
+        .where(and(eq(aiDm.direction, "in"), eq(aiDm.readFlag, 0)));
+  return Number(rows[0]?.n ?? 0);
 }
 
 export async function aiDmMarkRead(senderId?: string | null): Promise<void> {
-  if (senderId) await query("UPDATE ai_dm SET read_flag=1 WHERE sender_id=$1 AND direction='in'", [senderId]);
-  else await query("UPDATE ai_dm SET read_flag=1 WHERE direction='in'");
+  if (senderId) {
+    await db.update(aiDm).set({ readFlag: 1 })
+      .where(and(eq(aiDm.senderId, senderId), eq(aiDm.direction, "in")));
+  } else {
+    await db.update(aiDm).set({ readFlag: 1 }).where(eq(aiDm.direction, "in"));
+  }
 }
 
 interface Candidate { person_id: number; label: string; }
 
-function parseCandidates(task: TaskRow): Candidate[] {
+function parseCandidates(t: TaskRow): Candidate[] {
   try {
-    const meta = JSON.parse(task.pending_meta || "{}");
+    const meta = JSON.parse(t.pending_meta || "{}");
     return Array.isArray(meta.candidates) ? meta.candidates : [];
   } catch { return []; }
 }
 
+async function confirmWithAssigneeClear(taskId: number, assignee: string): Promise<void> {
+  await db.update(task)
+    .set({ status: "confirmed", assignee, pendingMeta: null, updatedAt: sql`NOW()` })
+    .where(eq(task.id, taskId));
+}
+
 export async function resolveAssigneeReply(sender: string, reply: string): Promise<Record<string, unknown>> {
-  const task = await latestPendingAssigneeForCreator(sender);
-  if (!task) return { ok: false, reason: "no_pending_task" };
-  const candidates = parseCandidates(task);
+  const t = await latestPendingAssigneeForCreator(sender);
+  if (!t) return { ok: false, reason: "no_pending_task" };
+  const candidates = parseCandidates(t);
   const replyNorm = reply.trim();
 
   if (["取消", "否", "不对", "错误"].includes(replyNorm)) {
-    await rejectTask(task.id, "发送者取消歧义确认");
-    return { ok: true, action: "rejected", taskId: task.id };
+    await rejectTask(t.id, "发送者取消歧义确认");
+    return { ok: true, action: "rejected", taskId: t.id };
   }
   if (/^\d+$/.test(replyNorm)) {
     const idx = parseInt(replyNorm, 10) - 1;
     if (0 <= idx && idx < candidates.length) {
       const assignee = candidates[idx].label;
-      await query(
-        "UPDATE task SET status='confirmed', assignee=$1, pending_meta=NULL, updated_at=NOW() WHERE id=$2",
-        [assignee, task.id]);
-      return { ok: true, action: "confirmed", taskId: task.id, assignee };
+      await confirmWithAssigneeClear(t.id, assignee);
+      return { ok: true, action: "confirmed", taskId: t.id, assignee };
     }
     return { ok: false, reason: "invalid_choice", choices: candidates.map((c, i) => `${i + 1}. ${c.label}`) };
   }
   if (["确认", "是的", "对", "ok", "OK"].includes(replyNorm)) {
-    if (task.assignee) {
-      await confirmTask(task.id);
-      return { ok: true, action: "confirmed", taskId: task.id };
+    if (t.assignee) {
+      await confirmTask(t.id);
+      return { ok: true, action: "confirmed", taskId: t.id };
     }
     return { ok: false, reason: "no_assignee_to_confirm" };
   }
@@ -68,27 +82,24 @@ export async function resolveAssigneeReply(sender: string, reply: string): Promi
 }
 
 export async function resolveTaskByChoice(sender: string, choice: string, taskId?: number | null): Promise<Record<string, unknown>> {
-  let task: TaskRow | null = null;
+  let t: TaskRow | null = null;
   if (taskId) {
-    task = await getTaskDict(taskId);
+    t = await getTaskDict(taskId);
   } else {
-    task = await latestPendingAssigneeByDmTaskid(sender);
-    if (!task) task = await latestPendingAssigneeForCreator(sender);
+    t = await latestPendingAssigneeByDmTaskid(sender);
+    if (!t) t = await latestPendingAssigneeForCreator(sender);
   }
-  if (!task) return { ok: false, error: "no_pending_task" };
-  const candidates = parseCandidates(task);
+  if (!t) return { ok: false, error: "no_pending_task" };
+  const candidates = parseCandidates(t);
   const choiceNorm = choice.trim();
   if (/^\d+$/.test(choiceNorm)) {
     const idx = parseInt(choiceNorm, 10) - 1;
     if (0 <= idx && idx < candidates.length) {
       const assignee = candidates[idx].label;
-      await query(
-        "UPDATE task SET status='confirmed', assignee=$1, pending_meta=NULL, updated_at=NOW() WHERE id=$2",
-        [assignee, task.id]);
-      return { ok: true, action: "confirmed", taskId: task.id, assignee };
+      await confirmWithAssigneeClear(t.id, assignee);
+      return { ok: true, action: "confirmed", taskId: t.id, assignee };
     }
     return { ok: false, error: "invalid_choice", candidates: candidates.map((c, i) => `${i + 1}. ${c.label}`) };
   }
   return { ok: false, error: "unknown_reply" };
 }
-void auditLog; void one;
