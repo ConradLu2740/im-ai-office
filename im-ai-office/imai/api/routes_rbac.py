@@ -47,6 +47,16 @@ def role_set(body: RoleIn, request: Request):
         con.close()
 
 
+@router.get("/api/roles")
+def roles_list():
+    """M3 前端可视化：角色全量列表（只读，不设防；写仍走 check_admin）。"""
+    con = get_conn()
+    try:
+        return {"ok": True, "roles": rbac_svc.list_roles(con), "imAdmin": "group_admin"}
+    finally:
+        con.close()
+
+
 @router.get("/api/role/{oim_user_id}")
 def role_get(oim_user_id: str):
     con = get_conn()
