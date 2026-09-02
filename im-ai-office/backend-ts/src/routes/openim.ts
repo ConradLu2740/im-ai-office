@@ -69,3 +69,20 @@ openimRoutes.post("/openim/send_message", async (c) => {
 });
 
 openimRoutes.post("/openim/get_messages", (c) => c.json({ ok: true, messages: [] }));
+
+// 群名称解析（REST 会话列表不带 showName，前端渲染需要真实群名）
+openimRoutes.post("/openim/group_info", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const groupId = String(body.group_id ?? "");
+  if (!groupId) return c.json({ ok: false, error: "group_id 不能为空" });
+  try {
+    const data = await openimPost("/group/get_groups_info", { groupIDs: [groupId] }, config.openimAdminToken);
+    if (data.errCode === 0) {
+      const d = data.data as { groupInfos?: Array<{ groupName?: string }> } | undefined;
+      return c.json({ ok: true, groupName: d?.groupInfos?.[0]?.groupName ?? "" });
+    }
+    return c.json({ ok: false, error: String(data.errMsg ?? "") });
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) });
+  }
+});
