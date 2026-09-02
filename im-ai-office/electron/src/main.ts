@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, Notification, ipcMain } from "electron";
+import { spawn as nodeSpawn } from "node:child_process";
 import path from "node:path";
 import { BackendManager, backendHttpOk, type BackendEnv } from "./backend";
 
@@ -9,25 +10,33 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 
-const env: BackendEnv = { isPackaged: app.isPackaged, resourcesPath: process.resourcesPath };
+const env: BackendEnv = {
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  logFile: path.join(app.getPath("userData"), "logs", "backend.log"),
+};
 const backend = new BackendManager(env);
 const APP_URL = "http://127.0.0.1:8000/";
 
 const NOTIFY_EVENT_TYPES = new Set(["task_created", "reminder", "digest", "ai.card"]);
 
 function iconPath(): string {
-  return app.isPackaged
+  // 打包：resources 根下的 icon.png（extraResources 携带）；dev：electron/icons/icon.png
+  const p = app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
     : path.join(__dirname, "..", "icons", "icon.png");
+  return p;
 }
 
 function createWindow(): void {
+  const startHidden = process.argv.includes("--hidden");
   win = new BrowserWindow({
     width: 1280,
     height: 860,
     title: "IMAI 办公助手",
     icon: iconPath(),
     autoHideMenuBar: true,
+    show: !startHidden, // 开机自启（--hidden）时最小化到托盘
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -145,12 +154,50 @@ app.on("before-quit", () => {
   backend.stop();
 });
 
+// 单实例锁：避免双击多次叠出多个实例/多个后端
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (win) {
+      win.show();
+      win.focus();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
+  try {
+    await main();
+  } catch (err) {
+    // 主流程异常不再静默：写日志 + 弹错误框
+    const logFile = path.join(app.getPath("userData"), "logs", "main.log");
+    try {
+      const fs = await import("node:fs");
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.appendFileSync(logFile, `[${new Date().toISOString()}] main() fatal: ${err}\n`);
+    } catch { /* ignore */ }
+    const { dialog } = await import("electron");
+    dialog.showErrorBox("IMAI 启动失败", String(err));
+    app.quit();
+  }
+});
+
+/** 开机自启：直接注册 HKCU Run（Electron 33 的 setLoginItemSettings 在本机实测不生效，最小用例亦如此） */
+function registerLoginItem(): void {
+  const exe = app.getPath("exe");
+  nodeSpawn("reg", [
+    "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "/v", "IMAI", "/t", "REG_SZ", "/d", `"${exe}" --hidden`, "/f",
+  ], { windowsHide: true }).on("error", (e) => console.error("[imai-electron] 登录项注册失败：", e));
+}
+
+async function main(): Promise<void> {
   setupIpc();
 
   // 开机自启（仅打包态；dev 不污染登录项）
   if (app.isPackaged) {
-    app.setLoginItemSettings({ openAsHidden: true });
+    registerLoginItem();
   }
 
   const mode = await backend.precheck();
@@ -160,12 +207,17 @@ app.whenReady().then(async () => {
     if (!ok) console.error("[imai-electron] 后端启动超时（60s）");
   }
 
-  await setupTray();
+  // 先建窗口（后端未就绪也先出现 UI，loadURL 内部重试），托盘失败不阻塞主窗口
   createWindow();
+  try {
+    await setupTray();
+  } catch (err) {
+    console.error("[imai-electron] 托盘初始化失败：", err);
+  }
   void refreshBadge();
   setInterval(refreshBadge, 30000);
   void sseNotifyBridge();
-});
+}
 
 app.on("window-all-closed", () => {
   // 托盘应用：保持运行（退出走托盘菜单）

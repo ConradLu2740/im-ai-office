@@ -1,5 +1,6 @@
 {
   "name": "@imai/electron",
+  "productName": "IMAI",
   "version": "0.0.0",
   "private": true,
   "main": "entry.js",
@@ -17,7 +18,7 @@
   },
   "build": {
     "appId": "im.imai.office",
-    "productName": "IMAI办公助手",
+    "productName": "IMAI",
     "directories": {
       "output": "release",
       "buildResources": "icons"
@@ -28,6 +29,10 @@
     ],
     "extraResources": [
       {
+        "from": "icons/icon.png",
+        "to": "icon.png"
+      },
+      {
         "from": "../backend-ts/dist",
         "to": "backend/dist"
       },
@@ -37,7 +42,7 @@
       },
       {
         "from": "../.env",
-        "to": "backend/.env"
+        "to": ".env"
       }
     ],
     "win": {

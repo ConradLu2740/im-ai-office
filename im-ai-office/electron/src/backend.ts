@@ -46,6 +46,8 @@ function killTree(pid: number): Promise<void> {
 export interface BackendEnv {
   isPackaged: boolean;
   resourcesPath: string;
+  /** 打包态后端日志文件（dev 用 inherit 走控制台） */
+  logFile?: string;
 }
 
 export class BackendManager {
@@ -67,13 +69,15 @@ export class BackendManager {
     return "node"; // 依赖 PATH（dev / 已装 node 的目标机）
   }
 
-  private spawnArgs(): { cmd: string; args: string[]; cwd: string } {
+  private spawnArgs(): { cmd: string; args: string[]; cwd: string; stdio: "ignore" | "inherit" } {
     if (this.env.isPackaged) {
       const res = this.env.resourcesPath;
+      // cwd 与 dev（backend-ts）同构：serveStatic 的 ../web → backend/web，dotenv 的 ../../.env → resources/.env
       return {
         cmd: this.nodeExecutable(),
         args: [path.join(res, "backend", "dist", "index.js")],
-        cwd: path.join(res, "backend"),
+        cwd: path.join(res, "backend", "dist"),
+        stdio: "ignore",
       };
     }
     const root = path.resolve(__dirname, "..", "..", ".."); // electron/dist → electron → 仓库根
@@ -81,6 +85,7 @@ export class BackendManager {
       cmd: this.nodeExecutable(),
       args: ["--import", "tsx", "src/index.ts"],
       cwd: path.join(root, "backend-ts"),
+      stdio: "inherit",
     };
   }
 
@@ -105,8 +110,14 @@ export class BackendManager {
 
   async start(): Promise<boolean> {
     if (this.adopted) return true;
-    const { cmd, args, cwd } = this.spawnArgs();
-    this.proc = spawn(cmd, args, { cwd, stdio: ["ignore", "inherit", "inherit"], windowsHide: true });
+    const { cmd, args, cwd, stdio } = this.spawnArgs();
+    let stdioTarget: ("ignore" | "inherit" | number)[] = ["ignore", stdio, stdio];
+    if (this.env.isPackaged && this.env.logFile) {
+      fs.mkdirSync(path.dirname(this.env.logFile), { recursive: true });
+      const fd = fs.openSync(this.env.logFile, "a");
+      stdioTarget = ["ignore", fd, fd];
+    }
+    this.proc = spawn(cmd, args, { cwd, stdio: stdioTarget, windowsHide: true });
     this.proc.on("exit", (code) => {
       this.proc = null;
       if (this.quitting) return;
