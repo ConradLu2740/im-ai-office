@@ -223,8 +223,25 @@ function startSelfHeal() {
   }, 1500);
 }
 
+// 群名缓存：REST 会话列表不带 showName，异步解析真实群名后重渲染
+const _groupNameCache = new Map();
+
+async function resolveGroupNames(list) {
+  await Promise.all(list.filter(c => c.conversationType === 3 && c.groupID && !_groupNameCache.has(c.groupID))
+    .map(async c => {
+      try {
+        const r = await api("/openim/group_info", { method: "POST", body: JSON.stringify({ group_id: c.groupID }) });
+        if (r.ok && r.groupName) _groupNameCache.set(c.groupID, r.groupName);
+      } catch (_) {}
+    }));
+  return list.map(c => c.conversationType === 3 && c.groupID && _groupNameCache.has(c.groupID)
+    ? { ...c, showName: _groupNameCache.get(c.groupID) } : c);
+}
+
 function renderConversations(list) {
   const box = document.getElementById("sessionList");
+  // 过滤 AI 系统账号单聊（已有专属「AI 助手」会话，避免重复入口）
+  list = (list || []).filter(c => c.userID !== "imai_assistant");
   let html = `<div class="session" id="aiSession" data-action="selectAISession">
       <div class="avatar ai">AI</div>
       <div class="session-info">
@@ -233,7 +250,7 @@ function renderConversations(list) {
       </div>
       <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
     </div>`;
-  html += (list || []).map(c => {
+  html += list.map(c => {
     const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话"));
     const type = c.conversationType === 3 ? 3 : 1;
     let last = "";
@@ -300,7 +317,7 @@ async function loadConversations() {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
-      if (res.ok) { renderConversations(res.conversations || []); return; }
+      if (res.ok) { renderConversations(await resolveGroupNames(res.conversations || [])); return; }
       if (attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
       showToast("获取会话失败：" + (res.error || ""), false);
     } catch (e) {
@@ -308,30 +325,6 @@ async function loadConversations() {
       showToast("获取会话异常：" + e.message, false);
     }
   }
-}
-
-function renderConversations(list) {
-  const box = document.getElementById("sessionList");
-  let html = `<div class="session" id="aiSession" data-action="selectAISession">
-      <div class="avatar ai">AI</div>
-      <div class="session-info">
-        <div class="session-title">AI 助手</div>
-        <div class="session-preview" id="aiPreview">任务确认与提醒</div>
-      </div>
-      <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
-    </div>`;
-  html += list.map(c => {
-    const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话"));
-    const type = c.conversationType === 3 ? "群" : "单聊";
-    return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conversationID)}" data-target-id="${escAttr(c.groupID || c.userID)}" data-name="${escAttr(name)}" data-type="${c.conversationType}">
-      <div class="avatar">${name.slice(0,1)}</div>
-      <div class="session-info">
-        <div class="session-title">${name}</div>
-        <div class="session-preview">${type} · 点击开始聊天</div>
-      </div>
-    </div>`;
-  }).join("");
-  box.innerHTML = html;
 }
 
 let inAISession = false;
