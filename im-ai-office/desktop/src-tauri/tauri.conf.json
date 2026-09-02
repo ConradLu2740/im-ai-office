@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.moxianbao.imai",
   "build": {
-    "frontendDist": "../src",
+    "frontendDist": "../../web",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": ""
