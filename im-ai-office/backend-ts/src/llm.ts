@@ -29,7 +29,9 @@ async function defaultImpl(system: string, user: string, opts: { jsonMode?: bool
       { role: "user", content: user },
     ],
     temperature: 0.2,
-    max_tokens: opts.maxTokens ?? 1024,
+    // 2026-09-02：deepseek-v4-flash 变更为推理型输出（reasoning_content 计入 max_tokens），
+    // 默认 1024 会被长推理耗尽 → content 为空。提升到 4096 保证正文有额度。
+    max_tokens: opts.maxTokens ?? 4096,
   };
   if (opts.jsonMode !== false) payload["response_format"] = { type: "json_object" };
 
