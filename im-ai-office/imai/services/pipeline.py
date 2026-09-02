@@ -24,11 +24,13 @@ def intent_detect(msg, sys_ctx=""):
         "is_task": "boolean", "confidence": "high|medium|low",
         "content": "string", "assignee_hint": "string|nullable(用'我'表示说话人)",
         "deadline_hint": "string|nullable", "assign_mode": "assigned|self|third_party|none",
+        "is_completion": "boolean(消息表示某事已做完时 true，否则 false)",
     }
     system = (
         "你是办公群聊里的任务识别助手。只在消息确实安排/认领任务时 is_task=true。"
         "分清：明确指派(@某人或'你负责')=assigned；主动认领('我来')=self；第三人称指派('让小张跟一下')=third_party；无归属=none。"
         "指出某项具体工作还没人做/没人负责（如'XX还没人做呢'）也是待认领任务：is_task=true、assign_mode=none。"
+        "消息表示某件事/任务已经做完（如'做完了''搞定了''XX已交付'）时：is_task=false、is_completion=true、content=完成的事项；"
         "纯抱怨或闲聊不是任务；明确否认（'这不是任务'）时 is_task=false。不要臆断。输出严格JSON：" + json.dumps(schema, ensure_ascii=False)
     )
     if sys_ctx:
@@ -75,6 +77,37 @@ def resolve(con, msg, sender="李娜(娜姐)", intent=None):
 
 # ============ 主流程 ============
 
+def handle_completion(con, msg, sender, content_hint=None):
+    """G1 口头完成（最小版，宁漏勿错，工作流缺口登记 Spec §1.1）：
+
+    在该成员（assignee 与 sender 互相 LIKE 匹配）已确认的任务中，优先 content LIKE 命中，
+    否则取最近一条；命中多条取最近；无匹配不动任何任务。"""
+    from imai.services import bus
+    from imai.services.tasks import complete_task
+    c = con.cursor()
+    s = (sender or "").strip()
+    if not s:
+        return None
+    c.execute("SELECT * FROM task WHERE status='confirmed' AND assignee LIKE ? "
+              "ORDER BY id DESC", (f"%{s}%",))
+    from imai.db import _rows as _extract
+    tasks = _extract(c)
+    if not tasks:
+        return None
+    hint = (content_hint or "").strip()
+    picked = None
+    if hint:
+        for t in tasks:
+            if hint[:4] and hint[:4] in (t["content"] or ""):
+                picked = t
+                break
+    picked = picked or tasks[0]
+    if complete_task(con, picked["id"], actor=f"user:{s}"):
+        bus.fanout("task_completed", {"taskId": picked["id"], "by": "chat"})
+        return picked
+    return None
+
+
 def process_message(msg, sender="李娜(娜姐)", group_id=None):
     """跑完整链路，返回结构化结果。group_id 用于群级上下文注入。
     【现状缺陷登记】同 msg 重复投递会重复建任务（无去重）；g1_5 锁定实证，
@@ -87,6 +120,13 @@ def process_message(msg, sender="李娜(娜姐)", group_id=None):
     intent = intent_detect(msg, sys_ctx=sys_ctx)
     base = {"message": msg, "sender": sender, "intent": intent}
     if not to_bool(intent.get("is_task")):
+        # G1 口头完成：is_completion 命中 → 尝试标记对应任务 done（宁漏勿错）
+        if to_bool(intent.get("is_completion")):
+            picked = handle_completion(con, msg, sender, content_hint=intent.get("content"))
+            base["action"] = "task_completed" if picked else "skip"
+            if picked:
+                base["completed_task"] = {"taskId": picked["id"], "content": picked["content"]}
+            return base
         base["action"] = "skip"  # 非任务，静默
         return base
 

@@ -526,9 +526,10 @@ function renderTaskCard(t) {
   const confCls = { high: "tag-high", medium: "tag-mid", low: "tag-low" };
   const isPending = t.status === "pending_confirmation";
   const isConfirmed = t.status === "confirmed";
+  const isDone = t.status === "done";   // G1：完成终态
   const dlDate = parseDeadlineAt(t.deadline_at);
-  // 已到截止时间仍未终结（确认中/已确认未取消）→ 逾期标红，看板不再静默堆积僵尸任务
-  const isOverdue = dlDate && dlDate.getTime() < Date.now() && t.status !== "cancelled";
+  // 已到截止时间仍未终结（确认中/已确认未取消/未完成）→ 逾期标红；done 不再标红
+  const isOverdue = dlDate && dlDate.getTime() < Date.now() && t.status !== "cancelled" && !isDone;
   const proofs = (t.proofs || []).map(p => `${p.term}=${p.meaning || ""}`).slice(0, 2);
   let editHtml = "";
   if (isConfirmed && editingTaskId === t.id) {
@@ -543,12 +544,14 @@ function renderTaskCard(t) {
     </div>`;
   }
   const confirmedBtns = (isConfirmed && editingTaskId !== t.id) ? `<div class="ai-card-btns" style="margin-top:10px;">
+    <button class="a-yes" data-action="completeTask" data-task-id="${t.id}">完成</button>
     <button data-action="editTask" data-task-id="${t.id}">编辑</button>
     <button class="danger" data-action="cancelTask" data-task-id="${t.id}">取消任务</button>
   </div>` : "";
+  const doneBadge = isDone ? `<span style="color:#1a9e6c;font-weight:600;">✅ 已完成</span> · ` : "";
   return `
     <div class="task-card${isOverdue ? " overdue" : ""}">
-      <div class="task-card-title">${fmt(t.content)}</div>
+      <div class="task-card-title">${doneBadge}${fmt(t.content)}</div>
       <div class="task-card-meta">
         <span>#${t.id}</span>
         <span>${fmt(t.assignee)}</span>
@@ -616,6 +619,7 @@ async function loadTasks() {
     const pendingAssignee = data.tasks.filter(t => t.status === "pending_assignee");
     const pending = data.tasks.filter(t => t.status === "pending_confirmation");
     const confirmed = data.tasks.filter(t => t.status === "confirmed");
+    const done = data.tasks.filter(t => t.status === "done");   // G1：已完成仍展示（✅ 徽标），排最后
     // 老化排序：越临近/越已过期的待决任务排越前，避免旧任务沉底被遗忘
     const byDeadline = (a, b) => (parseDeadlineAt(a.deadline_at)?.getTime() ?? Infinity) - (parseDeadlineAt(b.deadline_at)?.getTime() ?? Infinity);
     pendingAssignee.sort(byDeadline); pending.sort(byDeadline);
@@ -624,7 +628,7 @@ async function loadTasks() {
     document.getElementById("countConfirmed").textContent = confirmed.length;
     document.getElementById("listPendingAssignee").innerHTML = pendingAssignee.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待指派任务</div>";
     document.getElementById("listPending").innerHTML = pending.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待确认任务</div>";
-    document.getElementById("listConfirmed").innerHTML = confirmed.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无已确认任务</div>";
+    document.getElementById("listConfirmed").innerHTML = confirmed.map(renderTaskCard).join("") + done.map(renderTaskCard).join("") || (confirmed.length + done.length ? "" : "<div style='color:#8f959e;font-size:12px;'>暂无已确认任务</div>");
     setBackendStatus(true, "后端已连接");
   } catch (e) {
     setBackendStatus(false, "后端未连接");
@@ -704,6 +708,14 @@ async function rejectApproval(id) {
     showToast(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""), r.ok);
     loadApprovals();
   } catch (e) { showToast("拒绝异常：" + e.message, false); }
+}
+
+async function completeTask(id) {
+  try {
+    const r = await api(`/api/tasks/${id}/complete`, { method: "POST", body: JSON.stringify({ actor: currentUser }) });
+    showToast(r.ok ? "任务已完成 ✅" : "操作失败", r.ok);
+    loadTasks();
+  } catch (e) { showToast("完成异常：" + e.message, false); }
 }
 
 // ============ M3 权限可视化（M3权限前端可视化Spec）============
@@ -1085,6 +1097,7 @@ function initSSE() {
           }
         }
         if (ev.type === "task_created" || ev.type === "ai.card") loadTasks();
+        if (ev.type === "task_completed") { loadTasks(); showToast("任务已完成 ✅", true); }
         if (ev.type === "task_created" || ev.type === "ai.card") updateAIUnread();
       } catch (_) {}
     };
@@ -1162,6 +1175,7 @@ function _dispatchAction(el) {
     case "abortEdit": editingTaskId = null; loadTasks(); break;
     case "saveTaskEdit": saveTaskEdit(Number(d.taskId)); break;
     case "cancelTask": cancelTask(Number(d.taskId), el); break;
+    case "completeTask": completeTask(Number(d.taskId)); break;
     case "addTermUI": addTermUI(); break;
     case "editTerm": editingTerm = d.term; loadMemory(); break;
     case "abortTermEdit": editingTerm = null; loadMemory(); break;
