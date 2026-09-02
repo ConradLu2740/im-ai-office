@@ -152,7 +152,12 @@ OPENIM_ADMIN_TOKEN=<admin token>
 ```
 
 ## 本地（无 Docker）说明
-当前沙箱无 docker，**AI 业务闭环已用 `core.py` + FastAPI + 真实 LLM 跑通**（见 `app.py`/`index.html`/`demo_pipeline.py`）。
+后端已全量迁移至 TypeScript（`backend-ts/`，Hono + Zod + postgres.js，2026-09-02）：
+```bash
+cd backend-ts && npm install
+DATABASE_URL="postgresql://imai:imai_secret@127.0.0.1:5432/imai" npx tsx src/index.ts   # 8000 端口
+npx vitest run   # 守卫测试（连 imai_test 库）
+```
 OpenIM 接入只需在有 docker 的机器上补「部署 + 配回调」两步，其余代码逻辑复用。
 
 ## 环境变量
