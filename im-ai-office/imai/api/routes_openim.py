@@ -84,7 +84,7 @@ def openim_conversations(body: dict):
 
 
 @router.post("/openim/send_message")
-def openim_send_message(body: dict):
+def openim_send_message(body: dict, request: Request):
     """UI 发送入口（网关收敛Spec §2-2）：REST 代发 OpenIM，不落库不跑 AI。
 
     回调是唯一落库+AI 入口：OpenIM 会把 clientMsgID 原样带回回调，
@@ -102,6 +102,15 @@ def openim_send_message(body: dict):
         return {"ok": False, "error": "group_id 或 recv_id 不能为空"}
     if not client_msg_id:
         return {"ok": False, "error": "client_msg_id 不能为空（前端生成，去重键）"}
+    # G3 缓解（工作流缺口登记 Spec §2）：每次发送留痕（含来源 IP），冒充行为可追溯
+    from imai.repos import audit_log
+    con = get_conn()
+    try:
+        audit_log(con, f"user:{user_id}", "send_message",
+                  {"group_id": group_id, "recv_id": recv_id, "client_msg_id": client_msg_id,
+                   "ip": getattr(getattr(request, "client", None), "host", "") or ""})
+    finally:
+        con.close()
     try:
         data = _openim_post("/msg/send_msg", {
             "sendID": user_id,

@@ -35,6 +35,24 @@ def confirm_task(con, task_id, assignee=None, deadline=None):
     return True
 
 
+def complete_task(con, task_id, actor="user"):
+    """G1 完成回流（工作流缺口登记与完成回流Spec §1）：confirmed/pending → done。
+
+    done 是新增终态：提醒扫描白名单不含 done → 逾期提醒自然终止。"""
+    c = con.cursor()
+    c.execute("SELECT status FROM task WHERE id=?", (task_id,))
+    row = c.fetchone()
+    if not row:
+        return False
+    if (row["status"] or "") not in ("confirmed", "pending_confirmation", "pending_assignee"):
+        return False
+    c.execute("UPDATE task SET status='done', updated_at=datetime('now') WHERE id=?", (task_id,))
+    con.commit()
+    audit_log(con, actor, "task_completed", {"taskId": task_id})
+    EVENTS.append({"event": "task.completed", "taskId": task_id})
+    return True
+
+
 def update_task(con, task_id, assignee=None, deadline=None, cancel=False):
     """迭代2 B1：已确认任务修改（改负责人/改期/取消）。
 

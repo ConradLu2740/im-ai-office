@@ -251,6 +251,22 @@ def reject(task_id: int, body: RejectIn = None):
     return {"ok": ok}
 
 
+@router.post("/api/tasks/{task_id}/complete")
+def task_complete(task_id: int, body: dict = None):
+    """G1 完成回流：任务标记 done，逾期提醒自然终止（工作流缺口登记 Spec §1）。"""
+    from imai.services import bus
+    from imai.services.tasks import complete_task
+    body = body or {}
+    con = get_conn()
+    try:
+        ok = complete_task(con, task_id, actor=body.get("actor") or "user")
+    finally:
+        con.close()
+    if ok:
+        bus.fanout("task_completed", {"taskId": task_id})
+    return {"ok": ok}
+
+
 @router.post("/api/tasks/resolve")
 def resolve(body: ResolveIn):
     con = get_conn()

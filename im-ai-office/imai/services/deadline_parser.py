@@ -150,6 +150,25 @@ def parse(text, now=None):
     return _final(None)
 
 
+def _mark_unparsed(con, task_id, text):
+    """G4（工作流缺口登记 Spec §3）：解析失败可观测——同任务只记一次。
+
+    复用 reminder_sent 的 UNIQUE(task_id, tier) 做一次性标记（tier='deadline_unparsed'），
+    避免双方言 JSON 查重；首次标记时同步 audit。"""
+    from imai.db import BACKEND
+    from imai.repos import audit_log
+    c = con.cursor()
+    if BACKEND == "postgres":
+        c.execute("INSERT INTO reminder_sent(task_id, tier) VALUES(%s, 'deadline_unparsed') "
+                  "ON CONFLICT (task_id, tier) DO NOTHING", (task_id,))
+    else:
+        c.execute("INSERT OR IGNORE INTO reminder_sent(task_id, tier) VALUES(?, 'deadline_unparsed')",
+                  (task_id,))
+    con.commit()
+    if c.rowcount:
+        audit_log(con, "system", "deadline_unparsed", {"taskId": task_id, "deadline": text})
+
+
 def backfill_pending(con, now=None):
     """回填 task.deadline_at 为 NULL 且 deadline 非空的任务。返回回填条数。
 
@@ -165,5 +184,8 @@ def backfill_pending(con, now=None):
             c.execute("UPDATE task SET deadline_at=? WHERE id=?",
                       (dt.strftime("%Y-%m-%d %H:%M"), row["id"]))
             n += 1
+        else:
+            # G4：解析失败可观测（哑弹截止登记，同任务只记一次）
+            _mark_unparsed(con, row["id"], text)
     con.commit()
     return n
