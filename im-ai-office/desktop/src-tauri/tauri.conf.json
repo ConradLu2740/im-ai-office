@@ -38,12 +38,11 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../app.py": "backend/app.py",
-      "../../imai": "backend/imai/",
-      "../../imai.db": "backend/imai.db",
-      "../../.env": "backend/.env",
-      "../../requirements.txt": "backend/requirements.txt",
-      "../src/msg_gateway.bundle.cjs": "backend/msg_gateway.bundle.cjs"
+      "../../backend-ts/src": "backend/backend-ts/src",
+      "../../backend-ts/package.json": "backend/backend-ts/package.json",
+      "../../backend-ts/tsconfig.json": "backend/backend-ts/tsconfig.json",
+      "../../backend-ts/node_modules": "backend/backend-ts/node_modules",
+      "../../.env": "backend/.env"
     },
     "macOS": {
       "infoPlist": "Info.plist"
