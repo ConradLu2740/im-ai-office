@@ -68,6 +68,14 @@ def list_approvals(con, status="pending"):
     return _extract(c)
 
 
+def list_roles(con):
+    """M3 前端可视化：role 表全量（稀疏存储，未设置者默认 member）。"""
+    c = con.cursor()
+    c.execute("SELECT oim_user_id, role, updated_at FROM role ORDER BY oim_user_id")
+    from imai.db import _rows as _extract
+    return _extract(c)
+
+
 def decide_approval(con, approval_id, approved, decided_by):
     """人工批复：批准则返回 detail(dict) 供后续执行；拒绝则标记 rejected。"""
     status = "approved" if approved else "rejected"

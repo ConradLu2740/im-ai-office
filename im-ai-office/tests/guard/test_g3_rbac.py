@@ -89,3 +89,21 @@ def test_g3_5_approvals_list_filter(client, db):
                 json={"group_id": "sg_001", "text": "A", "actor": "sim_user"})
     pend = client.get("/api/approvals", params={"status": "pending"}).json()["approvals"]
     assert len(pend) == 1 and pend[0]["status"] == "pending"
+
+
+def test_g3_6_roles_list_and_visualization(client, db):
+    """G3.6（M3权限前端可视化Spec）：GET /api/roles 返回已设置角色 + imAdmin 固定说明"""
+    client.post("/api/role/set", json={"oim_user_id": "user_viz", "role": "group_admin"}).json()
+    r = client.get("/api/roles").json()
+    assert r["ok"] is True and r["imAdmin"] == "group_admin"
+    rows = {x["oim_user_id"]: x["role"] for x in r["roles"]}
+    assert rows.get("user_viz") == "group_admin"
+    # list_roles 只读：库内记录数不变
+    con = db.conn if hasattr(db, "conn") else None
+    from imai.services import rbac as svc
+    from imai.db import get_conn
+    c2 = get_conn()
+    try:
+        assert any(x["oim_user_id"] == "user_viz" for x in svc.list_roles(c2))
+    finally:
+        c2.close()

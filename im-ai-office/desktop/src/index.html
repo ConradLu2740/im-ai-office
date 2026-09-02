@@ -109,6 +109,14 @@
   .approval-item .a-yes { background: #1a9e6c; color: #fff; }
   .approval-item .a-no { background: #f2f3f5; color: #5a6482; }
   .approval-empty { text-align: center; color: #8f959e; font-size: 13px; padding: 32px 0; }
+  /* M3 权限可视化 */
+  .rbac-section { margin-bottom: 20px; }
+  .role-badge { font-size: 11px; padding: 2px 10px; border-radius: 10px; background: #f2f3f5; color: #5a6482; }
+  .role-badge.role-admin { background: #1E2761; color: #fff; }
+  .role-form { display: flex; gap: 8px; margin-top: 12px; }
+  .role-form input { flex: 1; border: 1px solid #e5e7ee; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .role-form select { border: 1px solid #e5e7ee; border-radius: 8px; padding: 8px; font-size: 13px; background: #fff; }
+  .audit-item .a-detail { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .memory-block { margin-bottom: 16px; }
   .memory-block-title { font-size: 13px; font-weight: 600; color: #5a6482; margin-bottom: 8px; }
   .memory-term { font-size: 13px; color: #1E2761; margin-bottom: 6px; }
@@ -214,6 +222,7 @@
       <div class="board-tabs">
         <button class="tab active" data-action="tab" data-panel="board">看板</button>
         <button class="tab" data-action="tab" data-panel="approval" data-loader="loadApprovals">审批</button>
+        <button class="tab" data-action="tab" data-panel="rbac" data-loader="loadRbac">权限</button>
         <button class="tab" data-action="tab" data-panel="memory" data-loader="loadMemory">记忆</button>
         <button class="tab" data-action="tab" data-panel="summary" data-loader="loadSummary">汇总</button>
         <button class="tab" data-action="tab" data-panel="minutes" data-loader="loadMinutes">纪要</button>
@@ -237,10 +246,41 @@
 
     <div class="board-columns" id="panel-approval" style="display:none;">
       <div class="panel-toolbar">
-        <span class="panel-title">待审批（高风险动作）</span>
-        <button data-action="loadApprovals">刷新</button>
+        <span class="panel-title">高风险动作审批</span>
+        <div class="board-tabs">
+          <button class="tab active" data-action="approvalFilter" data-status="pending">待审批</button>
+          <button class="tab" data-action="approvalFilter" data-status="approved">已批准</button>
+          <button class="tab" data-action="approvalFilter" data-status="rejected">已拒绝</button>
+          <button data-action="loadApprovals">刷新</button>
+        </div>
       </div>
       <div id="approvalList" class="approval-list"></div>
+    </div>
+
+    <div class="board-columns" id="panel-rbac" style="display:none;">
+      <div class="rbac-section">
+        <div class="panel-toolbar">
+          <span class="panel-title">成员角色</span>
+          <button data-action="loadRoles">刷新</button>
+        </div>
+        <div style="font-size:12px;color:#8f959e;margin-bottom:10px;">未列出的用户默认 member；imAdmin 固定为 group_admin。修改角色需管理权限。</div>
+        <div id="roleList" class="approval-list"></div>
+        <div class="role-form">
+          <input id="roleUserId" placeholder="OpenIM 用户ID（如 user001）" />
+          <select id="roleValue">
+            <option value="member">member</option>
+            <option value="group_admin">group_admin</option>
+          </select>
+          <button class="primary" data-action="setRole">保存角色</button>
+        </div>
+      </div>
+      <div class="rbac-section">
+        <div class="panel-toolbar">
+          <span class="panel-title">审计日志（关键动作留痕）</span>
+          <button data-action="loadAudit">刷新</button>
+        </div>
+        <div id="auditList" class="approval-list"></div>
+      </div>
     </div>
 
     <div class="board-columns" id="panel-memory" style="display:none;">

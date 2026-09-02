@@ -670,6 +670,7 @@ async function loadTasks() {
 function showPanel(name) {
   document.getElementById("panel-board").style.display = name === "board" ? "" : "none";
   document.getElementById("panel-approval").style.display = name === "approval" ? "" : "none";
+  document.getElementById("panel-rbac").style.display = name === "rbac" ? "" : "none";
   document.getElementById("panel-memory").style.display = name === "memory" ? "" : "none";
   document.getElementById("panel-summary").style.display = name === "summary" ? "" : "none";
   document.querySelectorAll(".board-tabs .tab").forEach(t => {
@@ -688,25 +689,34 @@ async function loadSummary() {
   }
 }
 
-async function loadApprovals() {
+let _approvalStatus = "pending";
+
+async function loadApprovals(status) {
+  if (status) _approvalStatus = status;
+  const st = _approvalStatus;
   const box = document.getElementById("approvalList");
   try {
-    const data = await api("/api/approvals?status=pending");
+    const data = await api(`/api/approvals?status=${encodeURIComponent(st)}`);
     const list = data.approvals || [];
     if (!list.length) {
-      box.innerHTML = "<div class='approval-empty'>暂无待审批的高风险动作 ✅</div>";
+      const emptyText = { pending: "暂无待审批的高风险动作 ✅", approved: "暂无已批准记录", rejected: "暂无已拒绝记录" }[st] || "暂无记录";
+      box.innerHTML = `<div class='approval-empty'>${emptyText}</div>`;
       return;
     }
     box.innerHTML = list.map(a => {
       let detail = "";
       try { detail = JSON.stringify(JSON.parse(a.detail), null, 2); } catch(e) { detail = a.detail; }
-      return `<div class="approval-item">
-        <div class="a-head"><span class="a-action">${esc(a.action)}</span><span style="font-size:11px;color:#8f959e;">#${a.id}</span></div>
-        <div class="a-detail">${esc(detail)}</div>
+      const decided = a.status !== "pending" ? `<div style="font-size:11px;color:#8f959e;margin-bottom:6px;">${esc(a.decided_by || "")} · ${esc(a.decided_at || "")}</div>` : "";
+      const btns = a.status === "pending" ? `
         <div class="a-btns">
           <button class="a-yes" data-action="approveApproval" data-approval-id="${a.id}">批准</button>
           <button class="a-no" data-action="rejectApproval" data-approval-id="${a.id}">拒绝</button>
-        </div>
+        </div>` : "";
+      return `<div class="approval-item">
+        <div class="a-head"><span class="a-action">${esc(a.action)}</span><span style="font-size:11px;color:#8f959e;">#${a.id} · ${esc(a.status)}</span></div>
+        ${decided}
+        <div class="a-detail">${esc(detail)}</div>
+        ${btns}
       </div>`;
     }).join("");
   } catch (e) {
@@ -728,6 +738,65 @@ async function rejectApproval(id) {
     showToast(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""), r.ok);
     loadApprovals();
   } catch (e) { showToast("拒绝异常：" + e.message, false); }
+}
+
+// ============ M3 权限可视化（M3权限前端可视化Spec）============
+async function loadRbac() { await loadRoles(); await loadAudit(); }
+
+async function loadRoles() {
+  const box = document.getElementById("roleList");
+  try {
+    const data = await api("/api/roles");
+    const list = data.roles || [];
+    let html = `<div class="approval-item"><div class="a-head"><span class="a-action">imAdmin</span><span style="font-size:11px;color:#8f959e;">group_admin（固定）</span></div></div>`;
+    if (!list.length) {
+      html += "<div class='approval-empty'>role 表暂无记录（所有人默认 member）</div>";
+    } else {
+      html += list.map(r => `
+        <div class="approval-item">
+          <div class="a-head"><span class="a-action">${esc(r.oim_user_id)}</span>
+            <span class="role-badge ${r.role === "group_admin" ? "role-admin" : ""}">${esc(r.role)}</span></div>
+          <div style="font-size:11px;color:#8f959e;">更新于 ${esc(r.updated_at || "")}</div>
+        </div>`).join("");
+    }
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function setRole() {
+  const uid = document.getElementById("roleUserId").value.trim();
+  const role = document.getElementById("roleValue").value;
+  if (!uid) { showToast("请输入 OpenIM 用户ID", false); return; }
+  try {
+    const r = await api("/api/role/set", { method: "POST", body: JSON.stringify({ oim_user_id: uid, role }) });
+    showToast(r.ok ? `已设置 ${uid} = ${r.role}` : "设置失败：" + (r.error || ""), r.ok);
+    if (r.ok) { document.getElementById("roleUserId").value = ""; loadRoles(); }
+  } catch (e) { showToast("设置异常：" + e.message, false); }
+}
+
+async function loadAudit() {
+  const box = document.getElementById("auditList");
+  try {
+    const data = await api("/api/audit?limit=30");
+    const list = data.audit || [];
+    if (!list.length) {
+      box.innerHTML = "<div class='approval-empty'>暂无审计记录</div>";
+      return;
+    }
+    box.innerHTML = list.map(a => {
+      let detail = a.detail || "";
+      if (typeof detail === "object") { try { detail = JSON.stringify(detail); } catch(e) { detail = String(detail); } }
+      detail = String(detail).slice(0, 120);
+      return `<div class="approval-item audit-item">
+        <div class="a-head"><span class="a-action">${esc(a.action)}</span><span style="font-size:11px;color:#8f959e;">${esc(a.actor || "")} · ${esc(a.created_at || a.ts || "")}</span></div>
+        <div class="a-detail" style="margin-bottom:0;">${esc(detail)}</div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+  }
 }
 
 async function loadMemory() {
@@ -1098,6 +1167,12 @@ function _dispatchAction(el) {
     case "decideMine": decideMine(Number(d.cid), d.do, el); break;
     case "approveApproval": approveApproval(Number(d.approvalId)); break;
     case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
+    case "approvalFilter": loadApprovals(d.status);
+      document.querySelectorAll('#panel-approval .board-tabs .tab').forEach(t => t.classList.toggle("active", t.dataset.status === d.status)); break;
+    case "loadRbac": loadRbac(); break;
+    case "loadRoles": loadRoles(); break;
+    case "setRole": setRole(); break;
+    case "loadAudit": loadAudit(); break;
     case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;
   }
 }

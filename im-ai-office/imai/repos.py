@@ -149,10 +149,17 @@ def audit_log(con, actor, action, detail=None):
 
 def audit_recent(con, limit=30):
     c = con.cursor()
-    # PG 无 rowid：用自增 id；SQLite 保留 rowid
+    # PG 无 rowid：用自增 id；SQLite 保留 rowid。
+    # 时间列运行时探测（交接文档 #11）：代码 schema=ts，生产旧库=created_at（先例 stats._audit_time_col）
     from imai.db import BACKEND
     if BACKEND == "postgres":
-        c.execute("SELECT actor,action,detail,ts FROM audit ORDER BY id DESC LIMIT %s", (limit,))
+        c.execute("SELECT column_name AS col FROM information_schema.columns "
+                  "WHERE table_name='audit' AND column_name IN ('ts','created_at')")
+        names = {r["col"] for r in c.fetchall()}
+        tcol = "ts" if "ts" in names else ("created_at" if "created_at" in names else None)
+        if not tcol:
+            raise RuntimeError("audit 表缺少时间列（ts/created_at）")
+        c.execute(f"SELECT actor,action,detail,{tcol} AS ts FROM audit ORDER BY id DESC LIMIT %s", (limit,))
     else:
         c.execute("SELECT actor,action,detail,ts FROM audit ORDER BY rowid DESC LIMIT ?", (limit,))
     return _rows(c)
