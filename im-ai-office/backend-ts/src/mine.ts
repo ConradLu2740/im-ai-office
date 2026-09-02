@@ -1,4 +1,6 @@
-import { one, query, insertReturningId } from "./db.js";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { alias, mineCandidate, message, person, term } from "./db/schema.js";
 import { auditLog, insertTask } from "./repos.js";
 import { addTerm } from "./memory.js";
 import { getLlm } from "./llm.js";
@@ -18,19 +20,23 @@ const MINE_SYSTEM = (
 );
 
 async function insertCandidate(convId: string, kind: string, payload: unknown, evidence: string, msgCount: number, status = "pending"): Promise<number> {
-  return insertReturningId(
-    "INSERT INTO mine_candidate(conv_id, kind, payload, evidence, msg_count, status) VALUES($1,$2,$3,$4,$5,$6) RETURNING id",
-    [convId, kind, JSON.stringify(payload), evidence, msgCount, status]);
+  const rows = await db.insert(mineCandidate)
+    .values({ convId, kind, payload: JSON.stringify(payload), evidence, msgCount, status })
+    .returning({ id: mineCandidate.id });
+  return rows[0].id;
 }
 
-async function termExists(term: string): Promise<boolean> {
-  return (await one("SELECT 1 FROM term WHERE term=$1", [term])) !== null;
+async function termExists(termText: string): Promise<boolean> {
+  const rows = await db.select({ x: term.id }).from(term).where(eq(term.term, termText)).limit(1);
+  return rows.length > 0;
 }
 
-async function aliasExists(realName: string, alias: string): Promise<boolean> {
-  return (await one(
-    "SELECT 1 FROM alias a JOIN person p ON a.person_id=p.id WHERE p.real_name=$1 AND a.name=$2",
-    [realName, alias])) !== null;
+async function aliasExists(realName: string, aliasName: string): Promise<boolean> {
+  const rows = await db.select({ x: alias.id }).from(alias)
+    .innerJoin(person, eq(alias.personId, person.id))
+    .where(and(eq(person.realName, realName), eq(alias.name, aliasName)))
+    .limit(1);
+  return rows.length > 0;
 }
 
 interface MsgRow { ts: Date | string; sender_name: string; content: string; }
@@ -46,17 +52,17 @@ async function extractBatch(convId: string, rows: MsgRow[], stats: { skipped_bat
   }
   const ev = (data.evidence ?? {}) as Record<string, unknown>;
   for (const t of (data.terms as Array<Record<string, unknown>>) || []) {
-    const term = String(t.term ?? "").trim(), meaning = String(t.meaning ?? "").trim();
-    if (!term) continue;
-    const status = (await termExists(term)) ? "duplicate" : "pending";
-    await insertCandidate(convId, "term", { term, meaning }, String(ev.term ?? ""), rows.length, status);
+    const termText = String(t.term ?? "").trim(), meaning = String(t.meaning ?? "").trim();
+    if (!termText) continue;
+    const status = (await termExists(termText)) ? "duplicate" : "pending";
+    await insertCandidate(convId, "term", { term: termText, meaning }, String(ev.term ?? ""), rows.length, status);
     stats.by_kind.term += 1;
   }
   for (const a of (data.aliases as Array<Record<string, unknown>>) || []) {
-    const real = String(a.real_name ?? "").trim(), alias = String(a.alias ?? "").trim();
-    if (!real || !alias) continue;
-    const status = (await aliasExists(real, alias)) ? "duplicate" : "pending";
-    await insertCandidate(convId, "alias", { real_name: real, alias }, String(ev.alias ?? ""), rows.length, status);
+    const real = String(a.real_name ?? "").trim(), aliasName = String(a.alias ?? "").trim();
+    if (!real || !aliasName) continue;
+    const status = (await aliasExists(real, aliasName)) ? "duplicate" : "pending";
+    await insertCandidate(convId, "alias", { real_name: real, alias: aliasName }, String(ev.alias ?? ""), rows.length, status);
     stats.by_kind.alias += 1;
   }
   for (const t of (data.tasks as Array<Record<string, unknown>>) || []) {
@@ -70,14 +76,14 @@ async function extractBatch(convId: string, rows: MsgRow[], stats: { skipped_bat
 }
 
 export async function runMining(convId: string, limit = 500, batch = 100): Promise<Record<string, unknown>> {
-  const rows = await query<MsgRow>(
-    "SELECT * FROM (SELECT * FROM message WHERE conv_id=$1 ORDER BY id DESC LIMIT $2) t ORDER BY id ASC",
-    [convId, Math.floor(limit)]);
+  const recent = db.select().from(message).where(eq(message.convId, convId))
+    .orderBy(desc(message.id)).limit(Math.floor(limit)).as("t");
+  const rows = await db.select().from(recent).orderBy(asc(recent.id));
   if (!rows.length) throw new Error("no_messages");
   const stats = { skipped_batches: 0, by_kind: { term: 0, alias: 0, task: 0 } };
   const step = Math.max(1, Math.min(Math.floor(batch), 500));
   for (let i = 0; i < rows.length; i += step) {
-    await extractBatch(convId, rows.slice(i, i + step), stats);
+    await extractBatch(convId, rows.slice(i, i + step) as unknown as MsgRow[], stats);
   }
   await auditLog("user", "mine_run", {
     convId, msgCount: rows.length, batches: Math.ceil(rows.length / step),
@@ -96,13 +102,14 @@ function rowToDict(row: Record<string, unknown>): Record<string, unknown> {
 }
 
 export async function listCandidates(status = "pending", kind?: string): Promise<Array<Record<string, unknown>>> {
-  const conds: string[] = []; const params: unknown[] = [];
-  if (status) { conds.push(`status=$${params.length + 1}`); params.push(status); }
-  if (kind) { conds.push(`kind=$${params.length + 1}`); params.push(kind); }
-  const where = conds.length ? " WHERE " + conds.join(" AND ") : "";
-  const rows = await query<Record<string, unknown>>(
-    `SELECT * FROM mine_candidate${where} ORDER BY id DESC`, params);
-  return rows.map(rowToDict);
+  const q = db.select().from(mineCandidate).$dynamic().orderBy(desc(mineCandidate.id));
+  const conds = [];
+  if (status) conds.push(eq(mineCandidate.status, status));
+  if (kind) conds.push(eq(mineCandidate.kind, kind));
+  const rows = conds.length
+    ? await q.where(and(...conds))
+    : await q;
+  return rows.map(rowToDict) as unknown as Array<Record<string, unknown>>;
 }
 
 async function accept(cand: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -113,15 +120,22 @@ async function accept(cand: Record<string, unknown>): Promise<Record<string, unk
     return { term: payload.term };
   }
   if (kind === "alias") {
-    const real = String(payload.real_name), alias = String(payload.alias);
-    const p = await one<{ id: number }>("SELECT id FROM person WHERE real_name=$1 ORDER BY id DESC LIMIT 1", [real]);
+    const real = String(payload.real_name), aliasName = String(payload.alias);
+    const existing = await db.select({ id: person.id }).from(person)
+      .where(eq(person.realName, real)).orderBy(desc(person.id)).limit(1);
     let pid: number;
-    if (p) pid = p.id;
-    else pid = await insertReturningId("INSERT INTO person(real_name) VALUES($1) RETURNING id", [real]);
-    if (!(await one("SELECT 1 FROM alias WHERE person_id=$1 AND name=$2", [pid, alias]))) {
-      await query("INSERT INTO alias(person_id, name) VALUES($1,$2)", [pid, alias]);
+    if (existing.length) {
+      pid = existing[0].id;
+    } else {
+      const ins = await db.insert(person).values({ realName: real }).returning({ id: person.id });
+      pid = ins[0].id;
     }
-    return { personId: pid, alias };
+    const dup = await db.select({ x: alias.id }).from(alias)
+      .where(and(eq(alias.personId, pid), eq(alias.name, aliasName))).limit(1);
+    if (!dup.length) {
+      await db.insert(alias).values({ personId: pid, name: aliasName });
+    }
+    return { personId: pid, alias: aliasName };
   }
   if (kind === "task") {
     const tid = await insertTask(
@@ -134,15 +148,15 @@ async function accept(cand: Record<string, unknown>): Promise<Record<string, unk
 }
 
 export async function decideCandidate(cid: number, action: string): Promise<Record<string, unknown> | null> {
-  const row = await one<Record<string, unknown>>("SELECT * FROM mine_candidate WHERE id=$1", [cid]);
-  if (!row) return null;
-  const cand = rowToDict(row);
+  const rows = await db.select().from(mineCandidate).where(eq(mineCandidate.id, cid)).limit(1);
+  if (!rows.length) return null;
+  const cand = rowToDict(rows[0] as unknown as Record<string, unknown>);
   if (!["accept", "reject"].includes(action)) throw new Error("bad_action");
   if (cand.status !== "pending") throw new Error("already_decided");
   const result = action === "accept" ? await accept(cand) : {};
-  await query(
-    "UPDATE mine_candidate SET status=$1, decided_at=NOW(), decided_by='user' WHERE id=$2",
-    [action === "accept" ? "accepted" : "rejected", cid]);
+  await db.update(mineCandidate)
+    .set({ status: action === "accept" ? "accepted" : "rejected", decidedAt: sql`NOW()`, decidedBy: "user" })
+    .where(eq(mineCandidate.id, cid));
   await auditLog("user", action === "accept" ? "mine_accepted" : "mine_rejected",
     { candidateId: cid, kind: cand.kind, ...result });
   return { id: cid, status: action === "accept" ? "accepted" : "rejected", result };
