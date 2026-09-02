@@ -1,4 +1,4 @@
-import { pgTable, bigserial, text, integer, timestamp, unique, boolean, index, foreignKey, bigint, uniqueIndex, jsonb } from "drizzle-orm/pg-core"
+import { pgTable, bigserial, text, integer, timestamp, unique, boolean, index, foreignKey, bigint, uniqueIndex, jsonb, primaryKey } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -64,7 +64,51 @@ export const message = pgTable("message", {
 	msgSeq: integer("msg_seq"),
 	clientMsgId: text("client_msg_id"),
 	ts: timestamp({ withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	// 评审 D2：并发去重最终防线（check-then-insert 历史踩坑根因模式）；NULL 不受约束
+	uniqueIndex("uq_message_conv_client_msg").on(table.convId, table.clientMsgId),
+]);
+
+// ============ P3 自建聊天层（Spec §4.1；id 复用 OpenIM userID，禁另起新 id 体系） ============
+
+export const appUser = pgTable("app_user", {
+	// 直接复用 OpenIM userID（如 user001）：历史 message.sender_id/task.creator/ai_dm.sender_id/role.oim_user_id 天然对齐
+	id: text().primaryKey().notNull(),
+	username: text().notNull().unique(),
+	displayName: text("display_name"),
+	passwordHash: text("password_hash").notNull(),
+	role: text().default("member").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
 });
+
+export const session = pgTable("session", {
+	// 随机 32B hex token
+	token: text().primaryKey().notNull(),
+	userId: text("user_id").notNull().references(() => appUser.id),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const userGroup = pgTable("user_group", {
+	groupId: text("group_id").primaryKey().notNull(),
+	name: text(),
+});
+
+export const groupMember = pgTable("group_member", {
+	groupId: text("group_id").notNull(),
+	userId: text("user_id").notNull().references(() => appUser.id),
+	joinedAt: timestamp("joined_at", { withTimezone: true, mode: "string" }).defaultNow(),
+}, (table) => [
+	primaryKey({ columns: [table.groupId, table.userId], name: "pk_group_member" }),
+]);
+
+export const userLastRead = pgTable("user_last_read", {
+	userId: text("user_id").notNull(),
+	convId: text("conv_id").notNull(),
+	lastMsgId: text("last_msg_id"),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
+}, (table) => [
+	primaryKey({ columns: [table.userId, table.convId], name: "pk_user_last_read" }),
+]);
 
 export const mineCandidate = pgTable("mine_candidate", {
 	id: bigserial({ mode: "number" }).primaryKey().notNull(),
