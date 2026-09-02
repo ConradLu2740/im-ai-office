@@ -1,6 +1,8 @@
+import { and as and2, eq as eq2, inArray } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { reminderSent, task } from "./db/schema.js";
+import { TASK_COLS, auditLog } from "./repos.js";
 import { config, UNRESOLVED_STATUS } from "./config.js";
-import { one, query } from "./db.js";
-import { auditLog } from "./repos.js";
 import { aiDmSend } from "./aiDm.js";
 import { fanout } from "./sse.js";
 import { backfillPending } from "./deadline.js";
@@ -75,11 +77,13 @@ function compose(task: TaskLike, tier: string): { text: string; targets: string[
 }
 
 async function alreadySent(taskId: number, tier: string): Promise<boolean> {
-  return (await one("SELECT 1 FROM reminder_sent WHERE task_id=$1 AND tier=$2", [taskId, tier])) !== null;
+  const rows = await db.select({ x: reminderSent.id }).from(reminderSent)
+    .where(and2(eq2(reminderSent.taskId, taskId), eq2(reminderSent.tier, tier))).limit(1);
+  return rows.length > 0;
 }
 
 async function markSent(taskId: number, tier: string): Promise<void> {
-  await query("INSERT INTO reminder_sent(task_id, tier) VALUES($1,$2) ON CONFLICT (task_id, tier) DO NOTHING", [taskId, tier]);
+  await db.insert(reminderSent).values({ taskId, tier }).onConflictDoNothing();
 }
 
 async function maybeGroupWriteback(_task: TaskLike, _text: string): Promise<void> {
@@ -91,8 +95,8 @@ export interface ScanSummary { sent: Array<{ taskId: number; tier: string; text:
 export async function scanOnce(now?: Date): Promise<ScanSummary> {
   now = now ?? new Date();
   await backfillPending(now);
-  const tasks = await query<TaskLike & { id: number }>(
-    "SELECT * FROM task WHERE status IN ('confirmed','pending_assignee','pending_confirmation')");
+  const tasks = (await db.select(TASK_COLS).from(task)
+    .where(inArray(task.status, ['confirmed', 'pending_assignee', 'pending_confirmation']))) as unknown as Array<TaskLike & { id: number }>;
   const sent: Array<{ taskId: number; tier: string; text: string }> = [];
   for (const t of tasks) {
     for (const tier of judgeTiers(t, now)) {
