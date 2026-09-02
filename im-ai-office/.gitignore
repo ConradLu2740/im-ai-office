@@ -16,3 +16,6 @@ poll_*.txt
 
 # TS 后端
 backend-ts/node_modules/
+
+# 前端 TS 构建依赖
+frontend-ts/node_modules/
