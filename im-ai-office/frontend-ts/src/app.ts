@@ -2,7 +2,7 @@
 // 类型欠账 ~76 处（DOM 元素窄化/unknown 收敛），逐步移除本标记收紧。
 // API 层已摘出至 api.ts（无 @ts-nocheck，Hono RPC 契约全检）。
 // @ts-nocheck
-import { api, apiSetSession, type ApiResult } from "./api.js";
+import { api, apiSetSession, getTauriInvoke, type ApiResult } from "./api.js";
 window.onerror = function(msg, src, line){
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
 };
@@ -56,11 +56,11 @@ function setBackendStatus(ok, text) {
 }
 
 async function startBackend() {
-  if (!tauriInvoke) return showToast("当前不是桌面应用环境", false);
+  if (!getTauriInvoke()) return showToast("当前不是桌面应用环境", false);
   setBackendStatus(false, "正在启动后端...");
   document.getElementById("startBtn").style.display = "none";
   try {
-    const status = await tauriInvoke("start_backend");
+    const status = await getTauriInvoke()("start_backend");
     setBackendStatus(status.running, status.message);
   } catch (e) {
     setBackendStatus(false, "启动失败");
@@ -70,9 +70,9 @@ async function startBackend() {
 }
 
 async function runDiagnose() {
-  if (!tauriInvoke) return;
+  if (!getTauriInvoke()) return;
   try {
-    const info = await tauriInvoke("diagnose");
+    const info = await getTauriInvoke()("diagnose");
     logDebug({ action: "diagnose", ...info });
   } catch (e) {
     logDebug({ action: "diagnose", error: e.message || String(e) });
@@ -85,7 +85,7 @@ async function checkBackend() {
     setBackendStatus(true, "后端已连接");
   } catch (e) {
     setBackendStatus(false, "后端未启动");
-    if (tauriInvoke) document.getElementById("startBtn").style.display = "inline-block";
+    if (getTauriInvoke()) document.getElementById("startBtn").style.display = "inline-block";
   }
 }
 
@@ -106,7 +106,7 @@ function swapUser() {
 async function doLogin() {
   const user = document.getElementById("loginUser").value.trim();
   if (!user) return showToast("请输入用户名", false);
-  const password = (document.getElementById("loginPassword") || {}).value || "";
+  const password = (document.getElementById("loginPwd") || {}).value || "";
   try {
     // P3 自建认证：username/password → session token（res.user_id 复用 OpenIM userID）
     const res = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: user, password }) });
@@ -1076,17 +1076,30 @@ window.onload = () => {
   const savedUser = localStorage.getItem("imai_user");
   const savedToken = localStorage.getItem("imai_token");
   if (savedUser && savedToken) {
-    currentUser = savedUser;
-    currentToken = savedToken;
-    apiSetSession(savedUser, savedToken);
-    enterMainApp();
-    initSDK(savedUser, savedToken);
+    // P3：恢复会话前先验证 token（旧 OpenIM token 已失效 → 回登录页）
+    fetch(API_BASE + "/api/auth/me", { headers: { "Authorization": "Bearer " + savedToken } })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(me => {
+        if (!me.ok) return Promise.reject("invalid");
+        currentUser = me.user_id;
+        currentToken = savedToken;
+        apiSetSession(me.user_id, savedToken);
+        enterMainApp();
+        initSDK(me.user_id, savedToken);
+      })
+      .catch(() => {
+        localStorage.removeItem("imai_user");
+        localStorage.removeItem("imai_token");
+        currentUser = null;
+        currentToken = null;
+        document.getElementById("loginPage").classList.remove("hidden");
+      });
   }
   setInterval(checkBackend, 3000);
   setInterval(loadTasks, 5000);
   setInterval(updateAIUnread, 5000);
   initSSE();   // 新增：实时事件推送（轮询保留作兑底）
-  if (tauriInvoke) setTimeout(startBackend, 500);
+  if (getTauriInvoke()) setTimeout(startBackend, 500);
 };
 
 // ============ JS 错误可见化（页面顶部红条；定位 WebView 内静默故障用） ============

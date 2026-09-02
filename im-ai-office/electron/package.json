@@ -37,6 +37,10 @@
         "to": "backend/dist"
       },
       {
+        "from": "../backend-ts/drizzle",
+        "to": "backend/drizzle"
+      },
+      {
         "from": "../web",
         "to": "backend/web"
       },
