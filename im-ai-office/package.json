@@ -4,6 +4,8 @@
   "workspaces": ["backend-ts", "frontend-ts", "electron"],
   "scripts": {
     "dev:backend": "npm run dev -w @imai/backend",
+    "dev:electron": "npm run dev -w @imai/electron",
+    "build:electron": "npm run build -w @imai/electron",
     "dev:frontend": "npm run watch -w @imai/frontend",
     "build:backend": "npm run build -w @imai/backend",
     "build:frontend": "npm run build -w @imai/frontend",
