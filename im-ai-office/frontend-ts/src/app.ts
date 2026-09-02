@@ -443,21 +443,22 @@ async function sendMsg() {
     return;
   }
 
-  // 群聊/单聊：后端 REST 代发（网关收敛Spec §3-4），不落库不跑 AI——回调是唯一入口
+  // 群聊/单聊：P3 自建发送端点（内联 AI 闸门；落库幂等）；单聊暂不支持（Spec §4.4 移动端/单聊按需）
   try {
-    const payload = { user_id: currentUser, sender_name: currentUser, text, client_msg_id: cmid };
-    if (currentConversation.type === 3) {
-      payload.group_id = currentConversation.targetId;
-    } else {
-      payload.recv_id = currentConversation.targetId;
+    if (currentConversation.type !== 3) {
+      showToast("单聊发送将在切流后支持，请使用群聊", false);
+      return;
     }
-    // cmid 已在本地回显前生成并登记（2026-09-01）；回调 SSE 回声携带同 cmid，_seenMsgIDs 拦截
-    const res = await api("/openim/send_message", { method: "POST", body: JSON.stringify(payload) });
+    const payload = { conv_id: "sg_" + currentConversation.targetId, text, client_msg_id: cmid };
+    // cmid 已在本地回显前生成并登记；SSE 回声携带同 cmid/db_id，_seenMsgIDs 拦截
+    const res = await api("/api/messages/send", { method: "POST", body: JSON.stringify(payload) });
     if (!res.ok) {
-      showToast("发送失败：" + (res.error || ""), false);
+      if (res.dedup) { /* 幂等命中，本地已有回显 */ } else {
+        showToast("发送失败：" + (res.error || ""), false);
+      }
     } else {
-      // 回声配对：OpenIM 会重新生成 clientMsgID（不回传传入值），SSE 回声改按 serverMsgID 去重
-      if (res.msgId) _seenMsgIDs.add("srv:" + res.msgId);
+      // SSE 回声将携带同 client_msg_id 与 db_id，_seenMsgIDs 已含 cmid；服务端 db_id 亦可用于去重
+      if (res.id) _seenMsgIDs.add("db:" + res.id);
     }
     // 发送后刷新看板与 AI 未读（确认卡经 ai.card SSE / AI 助手会话到达）
     setTimeout(loadTasks, 1500);

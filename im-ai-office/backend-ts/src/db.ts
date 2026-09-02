@@ -62,6 +62,7 @@ export async function initSchema(): Promise<void> {
 /** 测试基座：清空全部业务表 + 重建种子（对齐 conftest.fresh_db）。 */
 export async function wipeAndSeed(): Promise<void> {
   const tables = ["mine_candidate", "minutes", "digest_sent", "reminder_sent", "event_dedup",
+    "user_last_read", "group_member", "user_group", "session", "app_user",
     "grp_meta", "term", "approval", "role", "message", "ai_dm", "audit", "task", "alias", "person"];
   for (const t of tables) await pool.query(`DELETE FROM ${t}`);
   await initSchema();

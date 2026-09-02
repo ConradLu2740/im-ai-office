@@ -1,13 +1,13 @@
 import { beforeEach, afterEach } from "vitest";
 import { pool, wipeAndSeed } from "../src/db.js";
 import { setLlmImpl, type LlmFn } from "../src/llm.js";
-import { setOpenimStub } from "../src/openim.js";
 
-// 测试基座（conftest.py 的 TS 版）：每次用例全新种子库 + fake LLM + OpenIM stub
+// 测试基座（conftest.py 的 TS 版）：每次用例全新种子库 + fake LLM
+// （P3：OpenIM stub 随 openim.ts 删除而退役；LLM 注入不变）
 
 export function makeIntent(o: Record<string, unknown> = {}): Record<string, unknown> {
   return { is_task: true, confidence: "high", content: null, assignee_hint: null,
-           deadline_hint: null, assign_mode: "self", is_completion: false, ...o };
+    deadline_hint: null, assign_mode: "self", is_completion: false, ...o };
 }
 
 export function makeFakeLlm(routes: Array<{ match: RegExp | string; intent: Record<string, unknown> }>): void {
@@ -21,14 +21,10 @@ export function makeFakeLlm(routes: Array<{ match: RegExp | string; intent: Reco
 
 beforeEach(async () => {
   await wipeAndSeed();
-  setOpenimStub({ sent_group: [], sent_private: [] });
 });
 
 afterEach(async () => {
   setLlmImpl(null);
-  setOpenimStub(null);
-  const { setOpenimPost } = await import("../src/openim.js");
-  setOpenimPost(null);
 });
 
 export { pool };

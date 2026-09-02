@@ -21,13 +21,19 @@ export interface ApiResult { ok?: boolean; error?: string; [k: string]: unknown 
 
 // 会话状态（app.ts 通过 apiSetSession 桥接；本模块内部 _relogin 使用）
 let currentUser: string | null = null;
+let currentToken: string | null = null;
 let _reloginInFlight: Promise<boolean> | null = null;
 
 export function apiSetSession(user: string | null, token: string | null): void {
   currentUser = user;
+  currentToken = token;
   if (token !== null) {
     try { localStorage.setItem("imai_token", token); } catch { /* 隐私模式 */ }
   }
+}
+
+function authHeaders(): Record<string, string> {
+  return currentToken ? { "Authorization": `Bearer ${currentToken}` } : {};
 }
 
 async function _relogin(): Promise<boolean> {
@@ -66,10 +72,11 @@ async function hcDispatch(path: string, method: string, body?: unknown): Promise
   if (!c) throw new Error(`unknown api path: ${p}`);
   const base = Object.keys(query).length ? { query } : {};
   let res: Response;
-  if (method === "GET") res = await c.$get!(base);
-  else if (method === "POST") res = await c.$post!(body !== undefined ? { ...base, json: body } : base);
-  else if (method === "PATCH") res = await c.$patch!(body !== undefined ? { ...base, json: body } : base);
-  else if (method === "DELETE") res = await c.$delete!(base);
+  const headers = authHeaders();
+  if (method === "GET") res = await c.$get!({ ...base, headers });
+  else if (method === "POST") res = await c.$post!({ ...base, headers, json: body });
+  else if (method === "PATCH") res = await c.$patch!({ ...base, headers, json: body });
+  else if (method === "DELETE") res = await c.$delete!({ ...base, headers });
   else throw new Error(`unsupported method: ${method}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();

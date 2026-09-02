@@ -29,7 +29,7 @@ CREATE TABLE "user_group" (
 CREATE TABLE "user_last_read" (
 	"user_id" text NOT NULL,
 	"conv_id" text NOT NULL,
-	"last_msg_id" text,
+	"last_msg_id" bigint,
 	"updated_at" timestamp with time zone DEFAULT now(),
 	CONSTRAINT "pk_user_last_read" PRIMARY KEY("user_id","conv_id")
 );

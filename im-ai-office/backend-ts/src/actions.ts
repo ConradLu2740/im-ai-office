@@ -1,11 +1,11 @@
 import { auditLog } from "./repos.js";
-import { openimClient } from "./openim.js";
 import { aiDmSend } from "./aiDm.js";
 import { fanout } from "./sse.js";
 import { memoryProofs } from "./memory.js";
 import type { ProcessResult } from "./pipeline.js";
 
 // ============ AI 动作执行（actions.py 的 TS 版）：确认卡副作用链收敛 ============
+// P3 触达改造：确认卡经 ai_dm 表 + SSE 事件推送（OpenIM 私聊代发已删除）
 
 export function buildConfirmText(task: Record<string, unknown>): string {
   const candidates = (task.candidates as Array<{ label: string }>) || [];
@@ -32,12 +32,7 @@ export async function executeAiActions(
     const text = buildConfirmText(task);
     await aiDmSend(senderId ?? "", text, (task.taskId as number) ?? null, "out");
     await auditLog("ai", "action_execute", { kind: "dm_out", taskId: task.taskId, source });
-    try {
-      await openimClient.sendPrivateConfirm(groupId, senderId ?? "", text);
-    } catch (e) {
-      return { action: "confirm_assignee", ok: false, error: String(e) };
-    }
-    fanout("ai.card", { taskId: task.taskId, assignee_candidates: task.candidates ?? [], source });
+    fanout("ai.card", { taskId: task.taskId, assignee_candidates: task.candidates ?? [], source, text });
     return { action: "confirm_assignee_sent", taskId: task.taskId as number };
   }
   if (action === "task_created") {

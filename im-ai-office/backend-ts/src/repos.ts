@@ -113,21 +113,24 @@ export interface MessageRow {
   content_type: number; is_self: number; msg_seq: number | null; client_msg_id: string | null; ts: Date | string;
 }
 
-/** 幂等：同 conv 内相同 client_msg_id 已存在时直接返回既有 id。 */
+/** 幂等写入（评审 D2：UNIQUE(conv_id, client_msg_id) + ON CONFLICT DO NOTHING 是并发最终防线）。
+ *  返回 { id, inserted }；冲突时返回既有行 id。 */
 export async function messageAdd(
   convId: string, senderId: string, senderName: string, content: string,
   isSelf = 0, msgSeq: number | null = null, clientMsgId: string | null = null, contentType = 101
-): Promise<number> {
+): Promise<{ id: number; inserted: boolean }> {
+  const inserted = await db.insert(message)
+    .values({ convId, senderId, senderName, content, isSelf, msgSeq, clientMsgId, contentType })
+    .onConflictDoNothing()
+    .returning({ id: message.id });
+  if (inserted.length) return { id: inserted[0].id, inserted: true };
   if (clientMsgId) {
     const hit = await db.select({ id: message.id }).from(message)
       .where(and(eq(message.convId, convId), eq(message.clientMsgId, clientMsgId)))
       .limit(1);
-    if (hit.length) return Number(hit[0].id);
+    if (hit.length) return { id: hit[0].id, inserted: false };
   }
-  const rows = await db.insert(message)
-    .values({ convId, senderId, senderName, content, isSelf, msgSeq, clientMsgId, contentType })
-    .returning({ id: message.id });
-  return rows[0].id;
+  throw new Error("message insert conflict but no client_msg_id to locate row");
 }
 
 export async function messageList(convId?: string): Promise<MessageRow[]> {
