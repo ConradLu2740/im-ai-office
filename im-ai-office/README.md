@@ -1,184 +1,122 @@
-## 对话式 AI 办公 · MVP 项目骨架
+# IMAI · 对话式 AI 办公助手
 
-> 内部自用 · 本地部署目标 · MVP 用云端 LLM 跑通 · TypeScript/Hono（2026-09-02 全量重写）
+> 内部自用 · 单机本地部署 · TypeScript 全栈（Hono + Drizzle + Electron）· 零 Docker / 零 Python / 零 Rust 工具链
 
 ## 架构一句话
 
 ```
-OpenIM(单独部署) --Webhook 回调--> 后端(Hono/TS，UI 数据面内聚) --> AI 识别/消歧/确认卡 → 看板/提醒
-                                              |
-               Postgres/SQLite + Redis + LLM Provider(云端/本地可切换)；前端经 SSE 收实时消息、REST 代发消息（无独立网关进程）
+Electron 壳（托盘/系统通知/开机自启/后端子进程生命周期）
+   │ HTTP(127.0.0.1:8000) + SSE 实时事件
+Hono/TS 后端单体（Zod 校验 · Drizzle 数据层 · scrypt 会话认证 · AI 管线）
+   │
+单一 PostgreSQL（业务 + 聊天，schema 由 drizzle-kit 迁移管理）
 ```
 
-## 代码分层（2026-08-27 Step1 拆层重组）
+聊天层为自建实现（2026-09-02 切流）：消息落库 → SSE fanout（携 DB id + client_msg_id 双去重键）→
+内联 AI 闸门（意图识别/归属判定/确认卡）。OpenIM 已退役（容器停止保留观察期，详见交接文档）。
 
-```text
-app.py                     兼容入口：python3 app.py / uvicorn app:app
-imai/
-├── config.py              配置与环境常量、进程内 EVENTS 单例
-├── db.py                  SQLite 连接与建表（种子：两个小张消歧场景）
-├── repos.py               数据访问（SQL 集中）
-├── services/
-│   ├── pipeline.py        AI 编排：意图判定→归属判定→落库（测试 mock 锚点）
-│   ├── tasks.py           任务确认/驳回流转
-│   ├── rbac.py            角色/高风险审批/审计语义
-│   ├── memory.py          团队记忆：术语/群简介/注入/溯源/修正沉淀
-│   └── ai_dm.py           AI 私聊会话 + 歧义回复收敛
-├── integrations/
-│   ├── llm_provider.py    OpenAI 兼容 LLM 调用（云端/本地只换配置）
-│   └── openim_client.py   OpenIM 消息回写（唯一实现）
-└── api/                   FastAPI 路由组装(create_app)，对外路径零变化
-tests/guard + tests/eval   回归安全网（26 断言 ≤0.2s；Eval 首轮基线 19/20，见《回归加固Spec.md》）
-```
-
-> ⚠️ **桌面打包（2026-09-02 起 Electron）**：`electron/` 壳（托盘/通知/自启/后端生命周期），
-> 打包 `npm run build:electron && npx electron-builder --win`；Tauri 已退役（desktop/ 删除）
-
-## 组成
-
-| 目录 | 说明 |
-|---|---|
-| `services/oim-webhook` | 接收 OpenIM 消息回调，转发到 Redis Streams |
-| `services/ai-agent` | 核心 AI：意图判定 / 归属判定 / 执行 / LLM(provider 抽象) |
-| `services/board-api` | 任务 / 看板 REST API |
-| `services/reminder` | 到期扫描 + 提醒调度 |
-| `services/auth` | RBAC 授权 |
-| `domain/` | schema.sql + 事件定义 |
-
-## 安全配置（Step4，均可选）
-
-| env | 作用 | 未设置时 |
-|---|---|---|
-| `IMAI_ADMIN_TOKEN` | 角色设置/审批决定需带 `X-IMAI-Admin-Token` 头 | 无鉴权 + WARN |
-| `IMAI_LOGIN_PASSWORD` | 登录需共享口令 | 匿名登录 + WARN |
-| `AUTH_TOKEN` | `/callback` 需带 `X-IMAI-Token` 头 | 回调放行 + WARN |
-| `IMAI_ALLOWED_ORIGINS` | CORS 白名单 | 默认桌面端+本地开发源 |
-| `IMAI_AI_MODE` | `async` 启用 Redis 事件化 AI（见《事件化异步Spec.md》） | sync |
-| `DATABASE_URL` | Postgres 连接串（设置且无 IMAI_DB 时启用） | SQLite |
-
-⚠️ 桌面打包已改 Electron（`electron/`，实测全绿）；tauri 相关条目作废。
-
-## 快速开始
-
-### 1. 启动基础依赖（Postgres + Redis）
-
-```bash
-docker compose up -d postgres redis
-```
-
-### 2. 初始化数据库
-
-```bash
-docker compose exec -T postgres psql -U imai -d imai -f /schema.sql
-```
-
-### 3. 启动 AI 服务
-
-> ⚠️ 本节为旧架构描述。**当前实际启动方式（2026-08-31 起）**：
-> - 开发：`powershell -File scripts\dev.ps1`（uvicorn --reload + web 同步监听）
-> - 无头：`python cli.py up / status / down`
-> - 自启开关：`powershell -File scripts\autostart.ps1 -Action enable|disable|status`
->   （默认 **OFF** 不自启；enable 后注册当前用户登录计划任务「IMAI Autostart」，
->   由 `scripts/start-silent.ps1` 静默拉起后端，不含 OpenIM server）
-
-```bash
-# 本地 LLM 之前用云端，配置见 .env（OPENAI_API_KEY 或自建兼容端点）
-cd services/ai-agent
-pip install -r requirements.txt
-python main.py
-```
-
-### 4. 联调 OpenIM（单独部署）
-
-> ⚠️ 旧架构容器组（oim-webhook / ai-agent / board-api / reminder）已于 2026-08-28 下线，
-> compose 中标记为 `profiles: ["legacy"]`，默认不再启动；需要考古时
-> `docker compose --profile legacy up -d <服务名>`。
-
-
-
-OpenIM 用官方方式单独部署（服务端全家桶较重），把你部署的 OpenIM 回调 URL 指向 `oim-webhook`：
-
-- OpenIM 回调配置：开启 `afterSendSingleMsg` / `afterSendGroupMsg` 等消息事件，回调地址填 `http://<oim-webhook>:8100/callback`
-- 具体配置见 OpenIM 官方文档（Callback 配置）
-
-## 环境变量
-
-见 `.env.example`。关键：
-- `LLM_API_KEY` / `LLM_BASE`：LLM provider（MVP 用云端，之后切本地部署，只改 provider 配置）
-- `DATABASE_URL` / `REDIS_URL`：Postgres 与 Redis
-- `AUTH_TOKEN`：OpenIM → oim-webhook 回调鉴权
-
-## OpenIM 接入指南（真实群聊跑进来）
-
-> 需要 **docker 环境**（OpenIM 服务端是容器化全家桶：etcd/mongo/redis/api/rpc）。
-> 下面 5 步把真实群聊接入我们的闭环。代码已备好，仅需配环境。
-
-### 1. 部署 OpenIM 服务端
-用官方 Docker Compose 部署 open-im-server（server/api/rpc 全套），得到：
-- `API_ADDRESS`：OpenIM API 地址（如 `http://localhost:10002`）
-- 管理端 `token`（admin secret，可在部署时配置）
-
-```bash
-# 参考官方 docker-compose 部署 OpenIM
-```
-
-### 2. 配置群消息回调 → 指向 oim-webhook
-在 OpenIM 配置里设置**回调 URL** 并开启对应协议开关：
-- 回调 URL：`http://<oim-webhook>:8100/callback`
-- 开启：`afterSendGroupMsg`（群消息发送后）
-- 方向：OpenIM Server → 我们 oim-webhook（HTTP POST）
-
-### 3. oim-webhook 接收解析 → 写 Redis Streams
-`services/oim-webhook/main.py` 已做好 OpenIM 回调解析（抽取 msgID/groupID/sendID/content），转发到 `msg` 流。
-
-### 4. ai-agent 消费 → 识别 → 归属 → 落库
-`services/ai-agent/main.py` 消费 `msg` 流，调 `intent.py`/`assign.py` 识别任务、消歧、落库。
-
-### 5. AI 回写群消息（确认卡 / 提醒 / 私聊消歧）
-`services/ai-agent/openim_client.py` 封装 OpenIM `POST /msg/send_msg`：
-- `send_group_notice()` → 群里发确认卡/提醒（`sessionType=3`）
-- `send_private_confirm()` → 私聊发送者做消歧确认（`sessionType=1`）
-
-需要环境变量：
-```bash
-OPENIM_API=http://localhost:10002
-OPENIM_ADMIN_TOKEN=<admin token>
-```
-
-### 联调自测（单点验证）
-部署后可用 curl 直接调 OpenIM 发消息接口，确认回调链路通：
-```bash
-# 在 OpenIM 发一条群消息 → 观察 oim-webhook 日志 → ai-agent 是否有 intent 输出
-```
-
-## 本地（无 Docker）说明
-后端已全量迁移至 TypeScript（`backend-ts/`，Hono + Zod + postgres.js，2026-09-02）：
-```bash
-cd backend-ts && npm install
-DATABASE_URL="postgresql://imai:imai_secret@127.0.0.1:5432/imai" npx tsx src/index.ts   # 8000 端口
-npx vitest run   # 守卫测试（连 imai_test 库）
-```
-OpenIM 接入只需在有 docker 的机器上补「部署 + 配回调」两步，其余代码逻辑复用。
-
-## 环境变量
-
-见 `.env.example`。关键：
-- `LLM_API_KEY` / `LLM_BASE`：LLM provider（MVP 用云端，之后切本地部署，只改 provider 配置）
-- `DATABASE_URL` / `REDIS_URL`：Postgres 与 Redis
-- `AUTH_TOKEN`：OpenIM → oim-webhook 回调鉴权
-- `OPENIM_API` / `OPENIM_ADMIN_TOKEN`：AI 回写群消息用
+## 代码结构（npm workspaces monorepo）
 
 ```text
 im-ai-office/
-├── docker-compose.yml
-├── .env.example
-├── domain/
-│   ├── schema.sql
-│   └── events/events.md        # 事件协议说明
-└── services/
-    ├── oim-webhook/
-    ├── ai-agent/
-    ├── board-api/
-    ├── reminder/
-    └── auth/
+├── package.json               # workspaces: backend-ts / frontend-ts / electron
+├── backend-ts/                # TS 后端（Hono + Zod + Drizzle + pg + Vitest）
+│   ├── src/index.ts           # 入口（8000 端口，静态托管 web/ + 提醒调度）
+│   ├── src/app.ts             # 路由链式组装 + export type AppType（Hono RPC 契约）
+│   ├── src/pipeline.ts        # AI 编排：意图识别(Zod) → 归属判定 → 落库
+│   ├── src/auth.ts            # scrypt 口令 + session token（30 天）
+│   ├── src/db/schema.ts       # Drizzle schema（16+ 表，生产库内省基线）
+│   ├── src/db.ts              # initSchema = drizzle migrate + 种子
+│   ├── drizzle/               # 迁移（0000 audit 对齐 → 0001 聊天层新表…）
+│   ├── src/routes/            # auth / messages(发送+会话+未读) / tasks / rbac / memory / misc / extra
+│   ├── e2e/                   # acceptance 12 项 Vitest E2E（打真实环境）
+│   └── scripts/               # import-openim.mts（Mongo 一次性导入）/ set-password.mts（口令分发）
+├── frontend-ts/               # 原生 TS 前端（esbuild 单文件打包到 web/）
+│   ├── src/api.ts             # API 层（hc<AppType> Hono RPC + Bearer 会话，无 @ts-nocheck）
+│   ├── src/app.ts             # UI 逻辑（DOM 欠账 @ts-nocheck 渐进收紧）
+│   ├── src/__sentinel__/      # RPC 契约哨兵测试（拼错端点/方法 → 编译失败）
+│   └── static/                # index.html / styles.css 单一来源
+├── electron/                  # Electron 桌面壳（2026-09-02 替代 Tauri）
+│   ├── src/main.ts            # 窗口 / 托盘未读 / SSE 通知桥 / 注册表自启
+│   ├── src/backend.ts         # 后端子进程：spawn / 端口预检 / crash 退避 / taskkill 进程树
+│   └── release*/              # 安装包（IMAI Setup.exe，不入库）
+├── web/                       # 后端静态目录（frontend-ts 构建产物）
+├── scripts/quality-report.mjs # 识别质量周报（/api/stats/quality 客户端）
+└── docs/                      # 计划与 Spec（含《统一技术栈架构演进Spec.md》）
 ```
+
+## 快速开始
+
+### 1. 依赖
+
+- Node 22+（本机 26）、PostgreSQL 16（Windows 原生 `C:\imai\pgsql`，或任意 PG 实例）
+
+### 2. 安装与建表
+
+```bash
+npm install                # workspaces 一次装全
+cd backend-ts
+npx drizzle-kit migrate    # 空库自动建全表（迁移由 journal 管理）
+```
+
+### 3. 启动
+
+```bash
+# 开发：后端
+npm run dev:backend        # 等价 cd backend-ts && npx tsx src/index.ts
+# 开发：前端（改动实时打包到 web/）
+npm run dev:frontend
+
+# 桌面端（推荐）：Electron 自动拉起后端
+npm run dev:electron
+# 打包 Windows 安装包
+cd electron && npx electron-builder --win
+```
+
+浏览器模式：直接访问 `http://127.0.0.1:8000`（Electron 壳加载的就是同一页面）。
+
+### 4. 登录
+
+`/api/auth/login`（username + password → session token，30 天）。
+账号口令由管理员用 `cd backend-ts && npx tsx scripts/set-password.mts <username> <password> [user_id]` 分发。
+
+## 环境变量（仓库根 .env，永不提交）
+
+| env | 作用 |
+|---|---|
+| `DATABASE_URL` | PostgreSQL 连接串（默认 `postgresql://imai:imai_secret@127.0.0.1:5432/imai`） |
+| `LLM_BASE` / `LLM_API_KEY` / `LLM_MODEL` | LLM provider（DeepSeek 兼容；v4-flash 为推理型输出，max_tokens 需 ≥4096） |
+| `IMAI_ADMIN_TOKEN` | 角色设置/审批决定需带 `X-IMAI-Admin-Token` 头（未设置=放行+WARN） |
+| `IMAI_LOGIN_PASSWORD` | 已废弃（P3 改 per-user scrypt 认证） |
+| `AUTH_TOKEN` | 已废弃（OpenIM 回调随 P3 切流下线） |
+| `OPENIM_API` / `OPENIM_SECRET` | 仅切流前使用，切流后可从 .env 移除 |
+
+## 测试
+
+```bash
+cd backend-ts
+npx vitest run                          # 单元守卫 17 项（imai_test 库，fake LLM）
+IMAI_E2E_BASE=http://localhost:8000 npx vitest run --config vitest.e2e.config.ts
+                                        # acceptance 12 项 E2E（真实 LLM + 生产库，标记 e2e 自动清理）
+node ../scripts/quality-report.mjs      # 识别质量周报（只读）
+```
+
+测试约定：E2E 文本用「房间号/编号」等自然尾缀保证唯一（避开 30 分钟确定性去重窗口）；
+数据标记 `张敏(e2e)` / `e2e-*`，跑完自动清理。
+
+## OpenIM（已退役）
+
+2026-09-02 切流自建聊天层后，OpenIM 不再参与任何链路。历史容器仅 `docker stop` 保留
+2–4 周观察期（回滚窗口，见交接文档），届时 compose 移除 + prune。历史代码见
+git tag `python-backend-final`（Python 时代）与 `openim-era-final`（OpenIM 时代终态）。
+
+## 关键设计决策
+
+| 决策 | 原因 |
+|---|---|
+| SSE 而非 WebSocket | 聊天=推送+HTTP 发送+断线拉历史，SSE 已验证够用，省去连接管理/心跳/鉴权一类复杂度 |
+| 消息唯一渲染权威 = DB | 本地回显 → SSE 回声 → 历史重建三层去重（client_msg_id + db_id），重连全量刷新兜底 |
+| UNIQUE(conv_id, client_msg_id) | 并发去重最终防线（check-then-insert 历史踩坑根因模式） |
+| app_user.id 复用 OpenIM userID | 历史 message.sender_id / task.creator / role.oim_user_id 天然对齐，禁另起 id 体系 |
+| LLM 唯一锚点 getLlm() | 服务层禁直连 provider；测试 setLlmImpl 注入；max_tokens ≥4096（v4-flash 推理型输出） |
+| esbuild 依赖全内联 | 后端 dist/index.js 单文件运行仅需 node，Electron 分发不打包 node_modules |
