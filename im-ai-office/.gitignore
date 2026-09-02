@@ -27,4 +27,4 @@ backend-ts/dist/
 
 # Electron 构建产物与安装包
 electron/dist/
-electron/release/
+electron/release*/
