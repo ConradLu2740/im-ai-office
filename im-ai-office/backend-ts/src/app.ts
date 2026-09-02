@@ -15,12 +15,12 @@ import { checkCallbackToken } from "./deps.js";
 // ============ 应用组装（app.py + imai/api/__init__.py 的 TS 版） ============
 // 评审 B：必须链式合并并使用返回值——语句式 app.route() 的 typeof 不含路由类型
 
-const callbackHandler = async (c: import("hono").Context) => {
+const callbackHandler = async (c: import("hono").Context): Promise<Response> => {
   const denied = checkCallbackToken(c);
-  if (denied) return c.json(denied);
-  const payload = await c.req.json().catch(() => null);
-  if (!payload) return c.json({ ok: false, error: "invalid json" });
-  return c.json(await handleOpenimCallback(payload));
+  if (denied) return c.json(denied) as unknown as Response;
+  const payload = await c.req.json().catch((): null => null);
+  if (!payload) return c.json({ ok: false, error: "invalid json" }) as unknown as Response;
+  return c.json(await handleOpenimCallback(payload)) as unknown as Response;
 };
 
 export const app = new Hono()

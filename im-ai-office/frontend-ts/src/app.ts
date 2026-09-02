@@ -1,84 +1,19 @@
 // TODO(渐进迁移): @ts-nocheck 为移植期临时措施——本文件由 app.js 1:1 移植，
 // 类型欠账 ~76 处（DOM 元素窄化/unknown 收敛），逐步移除本标记收紧。
+// API 层已摘出至 api.ts（无 @ts-nocheck，Hono RPC 契约全检）。
 // @ts-nocheck
+import { api, apiSetSession, type ApiResult } from "./api.js";
 window.onerror = function(msg, src, line){
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
 };
 const API_BASE = "http://127.0.0.1:8000";
 const fmt = (s) => (s == null ? "—" : s);
-let tauriInvoke = null;
-try { tauriInvoke = window.__TAURI__.core.invoke; } catch (e) { tauriInvoke = null; }
 
-// 当前登录状态
+// 当前登录状态（镜像；API 层会话见 api.ts apiSetSession）
 let currentUser = null;
 let currentToken = null;
 let currentConversation = null;
 
-let _reloginInFlight = null;
-
-async function _relogin() {
-  // 静默重签 token（/openim/login 当前无口令）；单飞防并发重放。
-  // 若未来启用 IMAI_LOGIN_PASSWORD，此处会失败 → 调用方回登录页。
-  if (!currentUser) return false;
-  if (!_reloginInFlight) {
-    _reloginInFlight = (async () => {
-      try {
-        const res = await _rawApi("/openim/login", { method: "POST", body: JSON.stringify({ user_id: currentUser }) });
-        if (res && res.ok && res.token) {
-          currentToken = res.token;
-          localStorage.setItem("imai_token", res.token);
-          return true;
-        }
-      } catch (e) {}
-      return false;
-    })();
-  }
-  const ok = await _reloginInFlight;
-  _reloginInFlight = null;
-  return ok;
-}
-
-interface ApiOpts { method?: string; body?: string | null; headers?: Record<string, string> }
-
-async function _rawApi(path: string, opts: ApiOpts = {}) {
-  const method = (opts.method || "GET").toUpperCase();
-  let body = undefined;
-  if (opts.body) {
-    try { body = JSON.parse(opts.body); } catch (e) { body = opts.body; }
-  }
-  if (tauriInvoke) {
-    try {
-      return await tauriInvoke("api_call", { method, path, body });
-    } catch (e) {
-      throw new Error(`${e} (${path})`);
-    }
-  }
-  const res = await fetch(API_BASE + path, {
-    method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.json();
-}
-
-async function api(path: string, opts: { method?: string; body?: string | null; headers?: Record<string, string> } = {}, _retried = false): Promise<ApiResult> {
-  let res;
-  try {
-    res = await _rawApi(path, opts);
-  } catch (e) {
-    // 网络层失败且疑似登录态问题：重签一次再试
-    if (!_retried && currentUser && /token|登录|auth/i.test(String(e))) {
-      if (await _relogin()) return api(path, opts, true);
-    }
-    throw e;
-  }
-  // 业务层失败且疑似 token 失效：静默重签后重试原请求一次
-  if (!_retried && res && res.ok === false && /token/i.test(res.error || "")) {
-    if (await _relogin()) return api(path, opts, true);
-  }
-  return res;
-}
 
 function showToast(msg, ok = true) {
   let box = document.getElementById("toastBox");
@@ -177,6 +112,7 @@ async function doLogin() {
     if (res.ok) {
       currentUser = user;
       currentToken = res.token;
+      apiSetSession(user, res.token);
       localStorage.setItem("imai_user", user);
       localStorage.setItem("imai_token", res.token);
       enterMainApp();
@@ -194,6 +130,7 @@ function logout() {
   localStorage.removeItem("imai_token");
   currentUser = null;
   currentToken = null;
+  apiSetSession(null, null);
   currentConversation = null;
   document.getElementById("mainApp").classList.add("hidden");
   document.getElementById("loginPage").classList.remove("hidden");
@@ -220,7 +157,6 @@ export interface ConversationItem {
 declare global {
   interface Window { __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }
 }
-export interface ApiResult { ok?: boolean; error?: string; [k: string]: unknown }
 
 // ============ OpenIM SDK 实时消息 ============
 let sdk = null;
@@ -1141,6 +1077,7 @@ window.onload = () => {
   if (savedUser && savedToken) {
     currentUser = savedUser;
     currentToken = savedToken;
+    apiSetSession(savedUser, savedToken);
     enterMainApp();
     initSDK(savedUser, savedToken);
   }
