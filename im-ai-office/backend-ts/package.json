@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "build": "node build.mjs",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
