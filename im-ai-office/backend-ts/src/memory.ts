@@ -1,4 +1,7 @@
-import { query, one } from "./db.js";
+import { desc, eq, inArray, sql } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { grpMeta, task, term } from "./db/schema.js";
+import { TASK_COLS } from "./repos.js";
 import { auditLog, listTermDicts, aliasLabelRows, insertAliasIfAbsent, findPersonsByAlias, type TermRow, type TaskRow } from "./repos.js";
 import { UNRESOLVED_STATUS } from "./config.js";
 
@@ -8,29 +11,33 @@ export async function listTerms(): Promise<TermRow[]> {
   return listTermDicts();
 }
 
-export async function addTerm(term: string, meaning: string, source = "manual"): Promise<void> {
-  await query(
-    "INSERT INTO term(term, meaning, source) VALUES($1,$2,$3) " +
-    "ON CONFLICT(term) DO UPDATE SET meaning=EXCLUDED.meaning, source=EXCLUDED.source",
-    [term, meaning, source]);
-  await auditLog("system", "memorize", { type: "term", term, meaning, source });
+export async function addTerm(termText: string, meaning: string, source = "manual"): Promise<void> {
+  await db.insert(term)
+    .values({ term: termText, meaning, source })
+    .onConflictDoUpdate({ target: term.term, set: { meaning, source } });
+  await auditLog("system", "memorize", { type: "term", term: termText, meaning, source });
 }
 
 export async function getGrpMeta(oimGroupId: string): Promise<{ oim_group_id: string; intro: string; ai_enabled: number }> {
-  const row = await one<{ oim_group_id: string; intro: string; ai_enabled: number }>(
-    "SELECT * FROM grp_meta WHERE oim_group_id=$1", [oimGroupId]);
-  if (!row) return { oim_group_id: oimGroupId, intro: "", ai_enabled: 1 };
-  return row;
+  const rows = await db.select({
+    oim_group_id: grpMeta.oimGroupId,
+    intro: grpMeta.intro,
+    ai_enabled: grpMeta.aiEnabled,
+  }).from(grpMeta).where(eq(grpMeta.oimGroupId, oimGroupId)).limit(1);
+  if (!rows.length) return { oim_group_id: oimGroupId, intro: "", ai_enabled: 1 };
+  return rows[0] as { oim_group_id: string; intro: string; ai_enabled: number };
 }
 
 export async function setGrpMeta(oimGroupId: string, intro?: string, aiEnabled?: number): Promise<void> {
   const cur = await getGrpMeta(oimGroupId);
   const newIntro = intro ?? cur.intro;
   const newEnabled = aiEnabled ?? cur.ai_enabled;
-  await query(
-    "INSERT INTO grp_meta(oim_group_id, intro, ai_enabled) VALUES($1,$2,$3) " +
-    "ON CONFLICT(oim_group_id) DO UPDATE SET intro=EXCLUDED.intro, ai_enabled=EXCLUDED.ai_enabled, updated_at=NOW()",
-    [oimGroupId, newIntro, newEnabled]);
+  await db.insert(grpMeta)
+    .values({ oimGroupId, intro: newIntro, aiEnabled: newEnabled })
+    .onConflictDoUpdate({
+      target: grpMeta.oimGroupId,
+      set: { intro: newIntro, aiEnabled: newEnabled, updatedAt: sql`NOW()` },
+    });
   await auditLog("system", "set_grp_meta", { group_id: oimGroupId, intro: newIntro, ai_enabled: newEnabled });
 }
 
@@ -66,9 +73,9 @@ export async function buildSysCtx(groupId: string): Promise<string> {
 }
 
 export async function listDailyUnconfirmed(): Promise<TaskRow[]> {
-  return query<TaskRow>(
-    `SELECT * FROM task WHERE status IN ($1,$2) ORDER BY id DESC`,
-    [UNRESOLVED_STATUS[0], UNRESOLVED_STATUS[1]]);
+  return db.select(TASK_COLS).from(task)
+    .where(inArray(task.status, [UNRESOLVED_STATUS[0], UNRESOLVED_STATUS[1]]))
+    .orderBy(desc(task.id)) as unknown as Promise<TaskRow[]>;
 }
 
 export function buildDailySummaryText(tasks: TaskRow[], date?: string | null): { date: string; count: number; text: string } {
@@ -120,4 +127,3 @@ export async function memorizeRejectSignal(reason: string, taskId: number): Prom
     meaning: `正确负责人人称（待绑定 person，来源 reject 任务#${taskId}）`,
   });
 }
-void one;
