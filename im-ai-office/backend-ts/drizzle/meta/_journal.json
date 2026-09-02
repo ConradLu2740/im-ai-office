@@ -8,6 +8,13 @@
       "when": 1788348454805,
       "tag": "0000_audit_align",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788351714242,
+      "tag": "0001_p3_chat_tables",
+      "breakpoints": true
     }
   ]
 }
