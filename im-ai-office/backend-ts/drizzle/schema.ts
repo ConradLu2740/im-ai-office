@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm"
 
 
 export const aiDm = pgTable("ai_dm", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	senderId: text("sender_id"),
 	direction: text(),
 	content: text(),
@@ -14,7 +14,7 @@ export const aiDm = pgTable("ai_dm", {
 });
 
 export const grp = pgTable("grp", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	oimGroupId: text("oim_group_id"),
 	name: text(),
 	intro: text(),
@@ -25,7 +25,7 @@ export const grp = pgTable("grp", {
 ]);
 
 export const approval = pgTable("approval", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	actor: text(),
 	action: text(),
 	detail: text(),
@@ -48,13 +48,13 @@ export const eventDedup = pgTable("event_dedup", {
 
 export const grpMeta = pgTable("grp_meta", {
 	oimGroupId: text("oim_group_id").primaryKey().notNull(),
-	intro: text().default(''),
+	intro: text().default('),
 	aiEnabled: integer("ai_enabled").default(1),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 });
 
 export const message = pgTable("message", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	convId: text("conv_id"),
 	senderId: text("sender_id"),
 	senderName: text("sender_name"),
@@ -67,7 +67,7 @@ export const message = pgTable("message", {
 });
 
 export const mineCandidate = pgTable("mine_candidate", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	convId: text("conv_id"),
 	kind: text(),
 	payload: text(),
@@ -80,7 +80,7 @@ export const mineCandidate = pgTable("mine_candidate", {
 });
 
 export const minutes = pgTable("minutes", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	convId: text("conv_id"),
 	title: text(),
 	summary: text(),
@@ -91,7 +91,7 @@ export const minutes = pgTable("minutes", {
 });
 
 export const alias = pgTable("alias", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	personId: bigint("person_id", { mode: "number" }),
 	name: text(),
@@ -107,7 +107,7 @@ export const alias = pgTable("alias", {
 ]);
 
 export const reminderSent = pgTable("reminder_sent", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	taskId: bigint("task_id", { mode: "number" }),
 	tier: text(),
@@ -123,7 +123,7 @@ export const role = pgTable("role", {
 });
 
 export const person = pgTable("person", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	oimUserId: text("oim_user_id"),
 	realName: text("real_name"),
 	flowerName: text("flower_name"),
@@ -136,7 +136,7 @@ export const person = pgTable("person", {
 ]);
 
 export const task = pgTable("task", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	grpId: bigint("grp_id", { mode: "number" }),
 	content: text(),
@@ -161,7 +161,7 @@ export const task = pgTable("task", {
 ]);
 
 export const term = pgTable("term", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	grpId: bigint("grp_id", { mode: "number" }),
 	term: text(),
@@ -185,7 +185,7 @@ export const term = pgTable("term", {
 ]);
 
 export const audit = pgTable("audit", {
-	id: bigserial({ mode: "number" }).primaryKey().notNull(),
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
 	actor: text(),
 	action: text(),
 	detail: text(),
