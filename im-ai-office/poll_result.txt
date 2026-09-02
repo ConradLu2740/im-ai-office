@@ -1,4 +1,0 @@
-DIRECT | repr: 'Windows ������·��֤���ص������'
-DIRECT | repr: '编码分层测试ABC123中文'
-PROXY | repr: 'Windows ������·��֤���ص������'
-PROXY | repr: '编码分层测试ABC123中文'
