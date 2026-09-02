@@ -1,6 +1,7 @@
 # IMAI 办公助手 · 对话即工作台，AI 即员工
 
 ![License](https://img.shields.io/badge/license-PolyForm--NC%201.0.0-red)
+![Backend](https://img.shields.io/badge/backend-TypeScript%20%2F%20Hono-blue)
 
 > 一句话：把你的办公群聊交给一个 AI“数字员工”——它旁听大家聊天，谁说了要干什么活，它记下来、找说话人确认、进看板、到点提醒。人只负责拍板，跟进的事它包了。
 
@@ -8,7 +9,7 @@
 
 **IMAI is a conversational AI office assistant built on OpenIM + LLM.** It listens to your team chat, extracts tasks from casual messages ("Xiao Li, send the report by Friday"), asks the sender to confirm, tracks them on a kanban board, and sends due-date reminders — a human-in-the-loop ChatOps workflow bot for small teams (10–50 people). Self-hosted with your own database and your choice of LLM (DeepSeek / any OpenAI-compatible model), so your data never leaves your server.
 
-**Key capabilities:** AI task extraction from group messages · ambiguity resolution via AI DM (which "Zhang" did you mean?) · kanban with overdue alerts · tiered reminders (24h / due-day / overdue) · team memory (terms & nicknames injected into recognition) · RBAC with full audit trail.
+**Key capabilities:** AI task extraction from group messages · ambiguity resolution via AI DM (which "Zhang" did you mean?) · kanban with overdue alerts · tiered reminders (24h / due-day / overdue) · task completion tracking (button or natural language "done!") · team memory (terms & nicknames injected into recognition) · RBAC with full audit trail.
 
 **Ideal for:** project-based small teams without a dedicated PM, startups tired of verbal commitments nobody tracks, and privacy-sensitive teams that need private deployment. If your group chat produces 5+ "who should finish what by when" messages a day, this is for you.
 
@@ -24,7 +25,7 @@ IMAI 办公助手是一个**对话式 AI 办公系统**：在开源 IM（OpenIM�
    ├─ 有歧义（三个"小张"）→ AI 私聊说话人确认指谁
    └─ 无人认领 → 每天下班前汇总提醒管理员
 确认后 → 任务进看板 @负责人 → 到期自动提醒（24h 前 / 当天 / 逾期）
-负责人回"完成" → 看板同步
+负责人点「完成」或群里说"做完了" → 看板同步
 AI 全程留痕，关键动作必须人审
 ```
 
@@ -43,14 +44,15 @@ AI 全程留痕，关键动作必须人审
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 消息底座 | **OpenIM v3.8.3** | 开源 IM 全家桶（Docker Compose），Webhook 事件出口 + SDK 双通道接入 |
-| 消息网关 | **Node.js** | OpenIM SDK 桥接，消息进入 Redis 事件流 |
-| 后端 | **Python / FastAPI** | AI 识别管线、任务/看板/提醒/记忆/权限、同源反代 |
-| 数据库 | **PostgreSQL**（开发可用 SQLite） | 任务、消息、审计、去重 |
-| 大模型 | **OpenAI 兼容接口** | 默认 DeepSeek，本地模型只改 provider 配置即可切换 |
-| 前端 | **原生 JS + Tauri** | 浏览器直接用，Mac 可打包桌面 App |
+| 消息底座 | **OpenIM v3.8.3** | 开源 IM 全家桶（Docker Compose），Webhook 事件出口 |
+| 后端 | **TypeScript / Hono + Zod** | AI 识别管线、任务/看板/提醒/记忆/权限、REST 代发 + SSE 实时推送（UI 数据面与后端内聚，无独立网关进程） |
+| 数据库 | **PostgreSQL** | 任务、消息、审计、去重、团队记忆 |
+| 大模型 | **OpenAI 兼容接口** | 默认 DeepSeek，Zod Schema 结构化输出 + 验证重试；本地模型只改 provider 配置即可切换 |
+| 前端 | **原生 JS + Tauri 2** | 浏览器直接用，Mac 可打包桌面 App；SSE 收实时事件 |
 
-架构一句话：`OpenIM → 消息网关(8400) → FastAPI 后端(8000) → AI 识别 → 看板/提醒/记忆`，桌面端/浏览器与后端同源通信。
+架构一句话：`OpenIM → Webhook 回调 → Hono/TS 后端(8000，唯一落库+AI 入口) → AI 识别 → 看板/提醒/记忆`；前端收发全走后端 REST + SSE。
+
+> 🔁 2026-09-02 起后端由 Python/FastAPI 全量重写为 TypeScript（HTTP 契约 1:1），历史版本见 tag `python-backend-final`。
 
 ## 四、目标效果
 
@@ -58,10 +60,11 @@ AI 全程留痕，关键动作必须人审
 
 | 目标 | 衡量标准 | 现状 |
 |---|---|---|
-| 任务识别准 | 群里任务被正确识别、闲聊不打扰 | 意图识别带 eval 样本集回归，识别延迟 P50 ≈ 2s |
+| 任务识别准 | 群里任务被正确识别、闲聊不打扰 | 意图识别 Zod 结构化输出，识别延迟 P50 ≈ 2s |
 | 确认不烦人 | 80% 以上任务一次确认通过 | 内置质量统计接口（`/api/stats/quality`）持续观测 |
 | 事有归属 | 每条任务有发起人、负责人、截止 | 歧义私聊消歧 + 每日未确认清单兜底 |
-| 到期有人管 | 提前 24h / 当天 / 逾期三档提醒 | 调度器自动推送，逾期看板标红 |
+| 到期有人管 | 提前 24h / 当天 / 逾期三档提醒 | 调度器自动推送，完成自动终止，逾期看板标红 |
+| 完成有闭环 | 看板「完成」按钮 + 口头"做完了"识别 | 任务 done 终态，看板同步 |
 | 全程可追溯 | AI 每个动作有审计记录 | 关键动作留痕，被指派者可申诉 |
 | 越用越准 | 纠正信号沉淀为团队记忆 | 术语/称谓注入识别上下文，带溯源标注 |
 
@@ -70,22 +73,19 @@ AI 全程留痕，关键动作必须人审
 ## 五、快速开始
 
 ```bash
-cd im-ai-office
+cd im-ai-office/backend-ts
 
 # 1. 基础依赖（Postgres + Redis + OpenIM）
-docker compose -f deploy/docker-compose.yml --env-file deploy/openim.env up -d
+docker compose -f ../deploy/docker-compose.yml --env-file ../deploy/openim.env up -d
 
-# 2. 后端
-pip install -r requirements.txt
-cp .env.example .env   # 填 LLM_API_KEY 等
-python app.py          # http://localhost:8000
+# 2. 后端（TypeScript）
+npm install
+cp ../.env.example .env   # 填 DATABASE_URL、LLM_API_KEY 等
+npx tsx src/index.ts      # http://localhost:8000
 
-# 3. 消息网关
-node desktop/src/msg_gateway.bundle.cjs
-
-# 4. 验收
-python scripts/acceptance.py   # 12 项端到端检查
-python -m pytest tests/ -q     # 回归套件
+# 3. 验收
+python ../scripts/acceptance.py   # 12 项端到端检查
+npx vitest run                    # 守卫测试套件
 ```
 
 详细部署与 OpenIM 联调见 [im-ai-office/README.md](im-ai-office/README.md)。
@@ -94,14 +94,17 @@ python -m pytest tests/ -q     # 回归套件
 
 - ✅ M1 群聊即任务闭环（识别 / 确认卡 / 看板 / 提醒）
 - ✅ M2 归属判定增强（私聊消歧 / 别名索引 / 每日汇总兜底）
+- ✅ M3 权限与信任（RBAC / 审批 / 审计 + 前端可视化）
 - ✅ M4 团队记忆（术语 / 群简介 / 修正沉淀 / 溯源）
-- 🔶 M3 权限与信任（RBAC / 审批 / 审计已落地，前端可视化进行中）
-- ⏭ 会议纪要结构化产出、任务完成回写、本地大模型实测
+- ✅ 任务完成闭环（看板完成按钮 + 口头"做完了"识别）
+- ✅ 会议纪要结构化产出（行动项一键转任务）
+- 🔶 回调对账机制（后端停机期间消息补拉）
+- ⏭ 本地大模型实测切换（provider 锚点已就绪）
 
 ## 说明
 
 - 本项目为**内部自用工具**优先的 MVP，非商业产品；欢迎交流与参考
-- 识别质量是信任命门：内置 eval 样本集与质量统计，误判率持续可观测
+- 识别质量是信任命门：内置质量统计，误判率持续可观测
 
 ## 许可协议
 
@@ -112,4 +115,4 @@ python -m pytest tests/ -q     # 回归套件
 
 ---
 
-*Built with OpenIM · FastAPI · DeepSeek · Tauri*
+*Built with OpenIM · Hono (TypeScript) · DeepSeek · Tauri 2*
