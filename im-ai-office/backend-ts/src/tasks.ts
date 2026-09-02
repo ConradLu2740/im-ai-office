@@ -1,4 +1,6 @@
-import { one, query } from "./db.js";
+import { eq } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { reminderSent, task } from "./db/schema.js";
 import { auditLog, getTaskDict, type TaskRow } from "./repos.js";
 import { fanout } from "./sse.js";
 
@@ -6,13 +8,15 @@ import { fanout } from "./sse.js";
 
 export const CANCELLED = "cancelled";
 
+const touch = { updatedAt: new Date() };
+
 export async function confirmTask(taskId: number, assignee?: string | null, _deadline?: string | null): Promise<boolean> {
   const t = await getTaskDict(taskId);
   if (!t) return false;
   if (assignee !== undefined && assignee !== null) {
-    await query("UPDATE task SET status='confirmed', assignee=$1, updated_at=NOW() WHERE id=$2", [assignee, taskId]);
+    await db.update(task).set({ status: "confirmed", assignee, ...touch }).where(eq(task.id, taskId));
   } else {
-    await query("UPDATE task SET status='confirmed', updated_at=NOW() WHERE id=$1", [taskId]);
+    await db.update(task).set({ status: "confirmed", ...touch }).where(eq(task.id, taskId));
   }
   await auditLog("user", "confirm", { taskId });
   return true;
@@ -21,7 +25,7 @@ export async function confirmTask(taskId: number, assignee?: string | null, _dea
 export async function rejectTask(taskId: number, reason?: string | null): Promise<boolean> {
   const t = await getTaskDict(taskId);
   if (!t) return false;
-  await query("UPDATE task SET status='rejected', updated_at=NOW() WHERE id=$1", [taskId]);
+  await db.update(task).set({ status: "rejected", ...touch }).where(eq(task.id, taskId));
   await auditLog("user", "reject", { taskId, reason: reason ?? "" });
   // S4/M4：修正信号沉淀——驳回理由指明正确负责人时，更新人称别名
   if (reason) {
@@ -33,10 +37,10 @@ export async function rejectTask(taskId: number, reason?: string | null): Promis
 
 /** G1 完成回流：confirmed/pending → done（提醒扫描白名单不含 done，逾期提醒自然终止）。 */
 export async function completeTask(taskId: number, actor = "user"): Promise<boolean> {
-  const row = await one<{ status: string | null }>("SELECT status FROM task WHERE id=$1", [taskId]);
-  if (!row) return false;
-  if (!["confirmed", "pending_confirmation", "pending_assignee"].includes(row.status ?? "")) return false;
-  await query("UPDATE task SET status='done', updated_at=NOW() WHERE id=$1", [taskId]);
+  const rows = await db.select({ status: task.status }).from(task).where(eq(task.id, taskId)).limit(1);
+  if (!rows.length) return false;
+  if (!["confirmed", "pending_confirmation", "pending_assignee"].includes(rows[0].status ?? "")) return false;
+  await db.update(task).set({ status: "done", ...touch }).where(eq(task.id, taskId));
   await auditLog(actor, "task_completed", { taskId });
   return true;
 }
@@ -49,21 +53,20 @@ export async function updateTask(
   if (!row) return { err: "task_not_found" };
   const changes: Record<string, unknown> = {};
   if (assignee !== undefined && assignee !== null && assignee !== row.assignee) {
-    await query("UPDATE task SET assignee=$1, updated_at=NOW() WHERE id=$2", [assignee, taskId]);
+    await db.update(task).set({ assignee, ...touch }).where(eq(task.id, taskId));
     changes["assignee"] = [row.assignee, assignee];
   }
   if (deadline !== undefined && deadline !== null) {
     if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(deadline)) return { err: "bad_deadline" };
-    await query("UPDATE task SET deadline=$1, deadline_at=$1, updated_at=NOW() WHERE id=$2", [deadline, taskId]);
+    await db.update(task).set({ deadline, deadlineAt: deadline, ...touch }).where(eq(task.id, taskId));
     changes["deadline"] = [row.deadline, deadline];
-    await query("DELETE FROM reminder_sent WHERE task_id=$1", [taskId]);
+    await db.delete(reminderSent).where(eq(reminderSent.taskId, taskId));
   }
   if (cancel) {
-    await query("UPDATE task SET status=$1, updated_at=NOW() WHERE id=$2", [CANCELLED, taskId]);
+    await db.update(task).set({ status: CANCELLED, ...touch }).where(eq(task.id, taskId));
     changes["status"] = [row.status, CANCELLED];
   }
   await auditLog("user", "task_update", { taskId, changes });
-  const task = await getTaskDict(taskId);
-  return { task: task! };
+  const updated = await getTaskDict(taskId);
+  return { task: updated! };
 }
-void fanout;
