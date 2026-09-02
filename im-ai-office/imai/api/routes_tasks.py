@@ -137,7 +137,8 @@ def simulate_message(body: dict):
 
 @router.post("/api/sdk_message")
 def sdk_message(body: dict):
-    """SDK 收到的 OpenIM 实时消息：AI 识别 + 入库 + 显示。"""
+    """测试/验收入口（网关收敛Spec §2-5）：acceptance 用它模拟真实发送。
+    生产消息一律走 OpenIM 回调（唯一落库+AI 入口）；此路径保留纯为测试稳定。"""
     sender = body.get("sender", "同事")
     text = body.get("text", "")
     conv_id = body.get("conv_id", "sg_sdk")

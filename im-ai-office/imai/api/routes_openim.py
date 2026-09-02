@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """OpenIM 接入路由（自旧 app.py 1:1 迁移）：登录代理/会话/代发/回调入口 + 网关自动登录"""
 import json
-import os
-import threading
 import time
 import urllib.request
 import uuid
@@ -18,10 +16,8 @@ from imai.db import get_conn
 from imai.integrations import openim_client
 from imai.repos import message_add
 from imai.services import bus
-from imai.services.actions import build_confirm_text as _build_confirm_text
 from imai.services.actions import execute_ai_actions
-from imai.services.ai_dm import ai_dm_send, resolve_assignee_reply
-from imai.services.memory import memory_proofs
+from imai.services.ai_dm import resolve_assignee_reply
 from imai.services.pipeline import process_message
 
 router = APIRouter()
@@ -89,16 +85,23 @@ def openim_conversations(body: dict):
 
 @router.post("/openim/send_message")
 def openim_send_message(body: dict):
-    """发送消息（管理员代发，sender 显示为当前用户）。"""
+    """UI 发送入口（网关收敛Spec §2-2）：REST 代发 OpenIM，不落库不跑 AI。
+
+    回调是唯一落库+AI 入口：OpenIM 会把 clientMsgID 原样带回回调，
+    回调侧幂等闸门/去重/渲染键全部闭环在此 ID 上。
+    """
     user_id = body.get("user_id", "")
     group_id = body.get("group_id", "")
     recv_id = body.get("recv_id", "")
     sender_name = body.get("sender_name", user_id)
     text = body.get("text", "")
+    client_msg_id = (body.get("client_msg_id") or "").strip()
     if not user_id or not text:
         return {"ok": False, "error": "user_id/text 不能为空"}
     if not group_id and not recv_id:
         return {"ok": False, "error": "group_id 或 recv_id 不能为空"}
+    if not client_msg_id:
+        return {"ok": False, "error": "client_msg_id 不能为空（前端生成，去重键）"}
     try:
         data = _openim_post("/msg/send_msg", {
             "sendID": user_id,
@@ -108,38 +111,12 @@ def openim_send_message(body: dict):
             "content": {"content": text},
             "contentType": 101,
             "sessionType": 3 if group_id else 1,
+            "clientMsgID": client_msg_id,
+            "senderPlatformID": 4,   # 与 UI 登录 platform 一致（OSX/4）
         }, token=OPENIM_ADMIN_TOKEN)
         if data.get("errCode") == 0:
-            # 记录到本地 message 表
-            conv_id = f"sg_{group_id}" if group_id else f"single_{user_id}_{recv_id}"
-            con = get_conn()
-            try:
-                message_add(con, conv_id, user_id, sender_name, text, is_self=1,
-                            msg_seq=data["data"].get("seq"),
-                            client_msg_id=data["data"].get("serverMsgID", ""))
-            finally:
-                con.close()
-            # 发送成功后，同步做 AI 识别（不依赖 OpenIM 回调，双保险）
-            _t0 = time.perf_counter()
-            ai_result = process_message(text, sender_name)
-            from imai.services.pipeline import audit_ai_processed
-            audit_ai_processed(get_conn(), data.get("data", {}).get("serverMsgID"),
-                               ai_result, text, "openim_send",
-                               (time.perf_counter() - _t0) * 1000)
-            # 歧义时：写 AI 助手会话 + 发 OpenIM 私聊确认
-            if ai_result.get("action") == "confirm_assignee":
-                task = ai_result.get("task", {})
-                confirm_text = build_confirm_text(task)
-                con = get_conn()
-                try:
-                    ai_dm_send(con, user_id, confirm_text, task_id=task.get("taskId"), direction="out")
-                finally:
-                    con.close()
-                try:
-                    openim_client.send_private_confirm(group_id, user_id, confirm_text)
-                except Exception:
-                    pass
-            return {"ok": True, "msgId": data["data"].get("serverMsgID", ""), "ai": ai_result}
+            return {"ok": True, "msgId": data["data"].get("serverMsgID", ""),
+                    "client_msg_id": client_msg_id}
         return {"ok": False, "error": data.get("errMsg", "send failed")}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -170,6 +147,7 @@ def handle_openim_callback(payload: dict):
     sender_nickname = payload.get("senderNickname") or payload.get("sender_nickname") or sender_id
     content_type = payload.get("contentType") or payload.get("content_type") or 101
     client_msg_id = payload.get("clientMsgID") or payload.get("client_msg_id") or ""
+    server_msg_id = str(payload.get("serverMsgID") or payload.get("server_msg_id") or "")
     content = extract_text_content(payload.get("content", ""))
 
     if not content:
@@ -180,13 +158,8 @@ def handle_openim_callback(payload: dict):
     if int(content_type) != 101:
         return {"ok": True, "handled": False, "reason": "not_text"}
 
-    # 群消息：AI 旁听并识别任务
+    # 群消息：AI 旁听并识别任务（网关收敛后：回调是唯一落库+AI 入口，网关收敛Spec §1）
     if grp_id:
-        # 网关自发送（platform 5）：历史落库与 AI 都由前端 sdk_message 路径负责；
-        # 回调再处理会同消息双写双触发（实证 #79/#80 重复任务），直接跳过。
-        # 此分支仅服务来自其他客户端的消息（落库 + AI）。
-        if int(payload.get("senderPlatformID") or 0) == 5:
-            return {"ok": True, "handled": True, "action": "owned_by_sdk_path"}
         # 落库历史（此前回调只触发 AI、从不存消息 → UI 进群永远空白，2026-08-28 补上）；
         # content 可能是 JSON 包装串，清洗为纯文本
         content_clean = content
@@ -198,8 +171,7 @@ def handle_openim_callback(payload: dict):
             pass
         con = get_conn()
         try:
-            # 永久幂等闸门：同 clientMsgID 已入库 → 另一路径（sdk_message）已处理，跳过 AI
-            # （防 SDK 重连重投递导致重复建任务，2026-08-30 实证）
+            # 永久幂等闸门：同 clientMsgID 已入库 → 已被处理（回调单入口下防 OpenIM 重投递）
             if client_msg_id:
                 _c = con.cursor()
                 _c.execute("SELECT 1 FROM message WHERE conv_id=? AND client_msg_id=? LIMIT 1",
@@ -210,6 +182,18 @@ def handle_openim_callback(payload: dict):
                         client_msg_id=client_msg_id or None)
         finally:
             con.close()
+        # SSE 实时推流（网关收敛Spec §2-1）：前端 EventSource 接收替代 /gw/poll 轮询。
+        # server_msg_id 用于 UI 本地回声与 SSE 回声配对去重（OpenIM 对 REST 代发会重新生成
+        # clientMsgID，传入值不回传——2026-09-02 实测，去重改挂 serverMsgID）
+        bus.fanout("message", {
+            "conv_id": f"sg_{grp_id}",
+            "send_id": sender_id,
+            "sender_nickname": sender_nickname,
+            "content": content_clean,
+            "client_msg_id": client_msg_id,
+            "server_msg_id": server_msg_id,
+            "send_time": int(payload.get("sendTime") or 0) or None,
+        })
         _t0 = time.perf_counter()
         result = process_message(content, sender_nickname, group_id=grp_id)
         from imai.services.pipeline import audit_ai_processed
@@ -290,51 +274,4 @@ async def openim_callback_command(request: Request, command: str):
     return await openim_callback(request)
 
 
-# ============ 网关自动登录（启动后台线程，全兜底不阻塞）============
-
-def gateway_auto_login():
-    """后端启动后自动登录 OpenIM 网关：换 token → /gw/login → 轮询连接。
-    失败仅记日志，不阻塞后端启动（后台线程）。"""
-    def _do():
-        try:
-            user_id = os.environ.get("GW_LOGIN_USER", "user001")
-            # Tauri 启动顺序：先起后端、后端就绪后才起网关；这里等网关就绪（最多 30s）
-            for attempt in range(15):
-                try:
-                    with urllib.request.urlopen("http://127.0.0.1:8400/gw/ping", timeout=2) as r:
-                        json.loads(r.read())
-                    break
-                except Exception:
-                    if attempt == 14:
-                        print("[gw-auto] 网关 30s 内未就绪，放弃自动登录（后端继续运行）")
-                        return
-                    time.sleep(2)
-            data = _openim_post("/auth/get_user_token", {
-                "secret": OPENIM_SECRET,
-                "platformID": 5,
-                "userID": user_id,
-            }, token=OPENIM_ADMIN_TOKEN)
-            if data.get("errCode") != 0:
-                print(f"[gw-auto] 换 token 失败: {data.get('errMsg')}")
-                return
-            token = data["data"]["token"]
-            payload = json.dumps({"userID": user_id, "token": token}).encode()
-            req = urllib.request.Request(
-                "http://127.0.0.1:8400/gw/login", data=payload,
-                headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                print(f"[gw-auto] /gw/login -> {resp.read().decode()[:120]}")
-            for _ in range(20):  # 最多 10s 等网关连上
-                time.sleep(0.5)
-                try:
-                    with urllib.request.urlopen("http://127.0.0.1:8400/gw/ping", timeout=2) as r:
-                        if json.loads(r.read()).get("connected"):
-                            print(f"[gw-auto] OpenIM 网关已连接 user={user_id}")
-                            return
-                except Exception:
-                    pass
-            print("[gw-auto] 网关连接超时（10s），后端继续运行")
-        except Exception as e:
-            print(f"[gw-auto] 自动登录网关失败(忽略): {e}")
-
-    threading.Thread(target=_do, daemon=True).start()
+# ============ 网关自动登录（已随网关收敛删除，网关收敛Spec §2-3；2026-09-02）============
