@@ -32,7 +32,7 @@ export async function generateMinutes(convId: string, limit = 50): Promise<Recor
     [convId, Math.floor(limit)]);
   if (!rows.length) throw new Error("no_messages");
   const transcript = rows.map((r) => `【${r.ts}】${r.sender_name}：${r.content}`).join("\n");
-  const raw = await getLlm()(MINUTES_SYSTEM, transcript, { jsonMode: true });
+  const raw = await getLlm()(MINUTES_SYSTEM, transcript, { jsonMode: true, maxTokens: 4096 });
   let data: Record<string, unknown>;
   try { data = JSON.parse(raw); } catch { throw new Error("bad_llm"); }
   const id = await insertReturningId(

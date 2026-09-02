@@ -489,9 +489,9 @@ async function sendMsg() {
   try {
     const payload = { user_id: currentUser, sender_name: currentUser, text, client_msg_id: cmid };
     if (currentConversation.type === 3) {
-      payload.groupID = currentConversation.targetId;
+      payload.group_id = currentConversation.targetId;
     } else {
-      payload.recvID = currentConversation.targetId;
+      payload.recv_id = currentConversation.targetId;
     }
     // cmid 已在本地回显前生成并登记（2026-09-01）；回调 SSE 回声携带同 cmid，_seenMsgIDs 拦截
     const res = await api("/openim/send_message", { method: "POST", body: JSON.stringify(payload) });
