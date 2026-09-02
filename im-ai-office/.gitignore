@@ -21,3 +21,6 @@ node_modules/
 .env
 **/.env
 deploy/openim.env
+
+# 后端构建产物（electron 打包前现构建）
+backend-ts/dist/
