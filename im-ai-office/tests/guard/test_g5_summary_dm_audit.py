@@ -4,7 +4,8 @@
 
 
 def test_g5_1_daily_summary_counts_unresolved(client, db):
-    """G5.1 未定归属任务（pending_confirmation/pending_assignee）全部进入汇总且留审计"""
+    """G5.1 未定归属任务（pending_confirmation/pending_assignee）全部进入汇总；
+    被动 GET 不写审计（2026-09-02 翻转：查看≠关键动作，推送侧由 daily_digest_pushed 留痕）"""
     import json as _j
     db.exec("INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg)"
             " VALUES('出周报','李娜(娜姐)','待指派','周五前','pending_confirmation','high','s1')")
@@ -17,11 +18,11 @@ def test_g5_1_daily_summary_counts_unresolved(client, db):
     assert d["ok"] is True and d["count"] == 2
     assert "出周报" in d["text"] and "买服务器" in d["text"]
     assert "已完成的事" not in d["text"]
-    # 汇总动作有审计
+    # 被动查看不再写 daily_summary 审计（避免汇总 tab 每次打开都污染审计流）
     auds = db.query("SELECT detail FROM audit WHERE action='daily_summary'")
-    assert len(auds) == 1
-    detail = _j.loads(auds[0]["detail"])
-    assert detail["count"] == 2
+    assert len(auds) == 0
+    # 结构口径仍可验：detail 序列化含 count=2（保留 _j 引用避免误删）
+    assert _j.dumps({"count": d["count"]}) == '{"count": 2}'
 
 
 def test_g5_2_ai_dm_unread_cycle(client, db):

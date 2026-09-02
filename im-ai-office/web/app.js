@@ -682,8 +682,9 @@ async function loadSummary() {
   const box = document.getElementById("summaryBox");
   try {
     const data = await api("/api/summary/daily");
-    const text = (data.text || "").replace(/\n/g, "<br>");
-    box.innerHTML = `<div class="summary-text">${esc(text)}</div>`;
+    // 先转义再换行，避免 <br> 被转义成字面文本（双重转义 bug）
+    const text = esc(data.text || "").replace(/\n/g, "<br>");
+    box.innerHTML = `<div class="summary-text">${text}</div>`;
   } catch (e) {
     box.innerHTML = `<div class='approval-empty'>生成失败：${esc(e.message)}</div>`;
   }
@@ -776,6 +777,24 @@ async function setRole() {
   } catch (e) { showToast("设置异常：" + e.message, false); }
 }
 
+function _fmtAuditTime(ts) {
+  // ISO（2026-09-02T08:48:18.154161+08:00）→ 2026-09-02 08:48
+  return ts ? String(ts).slice(0, 16).replace("T", " ") : "";
+}
+
+function _fmtAuditDetail(d) {
+  // 人性化 detail：优先取 text 字段（汇总/通知类），其余紧凑 key=value，避免原始 JSON 倾倒
+  let obj = d;
+  if (typeof obj === "string") { try { obj = JSON.parse(obj); } catch (e) { return String(obj).slice(0, 140); } }
+  if (obj && typeof obj === "object") {
+    if (obj.text) return String(obj.text).replace(/\n+/g, " ／ ");
+    return Object.entries(obj)
+      .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+      .join(" · ").slice(0, 140);
+  }
+  return String(d).slice(0, 140);
+}
+
 async function loadAudit() {
   const box = document.getElementById("auditList");
   try {
@@ -785,15 +804,11 @@ async function loadAudit() {
       box.innerHTML = "<div class='approval-empty'>暂无审计记录</div>";
       return;
     }
-    box.innerHTML = list.map(a => {
-      let detail = a.detail || "";
-      if (typeof detail === "object") { try { detail = JSON.stringify(detail); } catch(e) { detail = String(detail); } }
-      detail = String(detail).slice(0, 120);
-      return `<div class="approval-item audit-item">
-        <div class="a-head"><span class="a-action">${esc(a.action)}</span><span style="font-size:11px;color:#8f959e;">${esc(a.actor || "")} · ${esc(a.created_at || a.ts || "")}</span></div>
-        <div class="a-detail" style="margin-bottom:0;">${esc(detail)}</div>
-      </div>`;
-    }).join("");
+    box.innerHTML = list.map(a => `
+      <div class="approval-item audit-item">
+        <div class="a-head"><span class="a-action">${esc(a.action)}</span><span style="font-size:11px;color:#8f959e;">${esc(a.actor || "")} · ${esc(_fmtAuditTime(a.ts || a.created_at))}</span></div>
+        <div class="a-detail" style="margin-bottom:0;">${esc(_fmtAuditDetail(a.detail))}</div>
+      </div>`).join("");
   } catch (e) {
     box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
   }
