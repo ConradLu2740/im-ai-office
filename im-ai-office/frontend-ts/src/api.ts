@@ -17,6 +17,11 @@ declare global {
 let tauriInvoke: ((cmd: string, args: unknown) => Promise<unknown>) | null = null;
 try { tauriInvoke = window.__TAURI__?.core?.invoke ?? null; } catch { tauriInvoke = null; }
 
+/** 历史桌面调试函数（startBackend/runDiagnose）兼容入口；Electron 壳下为 null */
+export function getTauriInvoke(): ((cmd: string, args: unknown) => Promise<unknown>) | null {
+  return tauriInvoke;
+}
+
 export interface ApiResult { ok?: boolean; error?: string; [k: string]: unknown }
 
 // 会话状态（app.ts 通过 apiSetSession 桥接；本模块内部 _relogin 使用）
@@ -72,11 +77,11 @@ async function hcDispatch(path: string, method: string, body?: unknown): Promise
   if (!c) throw new Error(`unknown api path: ${p}`);
   const base = Object.keys(query).length ? { query } : {};
   let res: Response;
-  const headers = authHeaders();
-  if (method === "GET") res = await c.$get!({ ...base, headers });
-  else if (method === "POST") res = await c.$post!({ ...base, headers, json: body });
-  else if (method === "PATCH") res = await c.$patch!({ ...base, headers, json: body });
-  else if (method === "DELETE") res = await c.$delete!({ ...base, headers });
+  const header = authHeaders();
+  if (method === "GET") res = await c.$get!({ ...base, header });
+  else if (method === "POST") res = await c.$post!({ ...base, header, json: body });
+  else if (method === "PATCH") res = await c.$patch!({ ...base, header, json: body });
+  else if (method === "DELETE") res = await c.$delete!({ ...base, header });
   else throw new Error(`unsupported method: ${method}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();

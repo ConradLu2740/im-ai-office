@@ -1,5 +1,6 @@
 import { Pool, types as pgTypes, type QueryResultRow } from "pg";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
 import { db } from "./db/drizzle.js";
@@ -46,7 +47,13 @@ const SEED_ALIASES: Array<[number, string]> = [
  * 空库跑全量迁移建表；已对齐库（生产 imai）no-op。手写 POSTGRES_SCHEMA 退役。
  */
 export async function initSchema(): Promise<void> {
-  await migrate(db, { migrationsFolder: path.resolve(import.meta.dirname, "../drizzle") });
+  const migrationsFolder = path.resolve(import.meta.dirname, "../drizzle");
+  if (fs.existsSync(path.join(migrationsFolder, "meta", "_journal.json"))) {
+    await migrate(db, { migrationsFolder });
+  } else {
+    // 打包布局下迁移文件夹缺失不应致命（表已由迁移管理/快照预置）
+    console.warn("[imai-ts] drizzle 迁移文件夹不存在，跳过 migrate（假设 schema 已就绪）");
+  }
   // 种子（与 Python 版 conftest 对齐）
   const { rows } = await pool.query<{ n: string }>("SELECT COUNT(*)::text AS n FROM person");
   if (Number(rows[0].n) === 0) {
