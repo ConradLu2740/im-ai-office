@@ -5,11 +5,11 @@ import { openimPost, openimClient, sendMsgAsUser } from "../openim.js";
 import { auditLog, messageAdd } from "../repos.js";
 import { handleOpenimCallback } from "../callback.js";
 
-export const openimRoutes = new Hono();
+export const openimRoutes = new Hono()
 
 // ---- 登录 / 会话（user token 走 platformID=4，避免互踢） ----
 
-openimRoutes.post("/openim/login", async (c) => {
+  .post("/openim/login", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const denied = checkLoginPassword(body);
   if (denied) return c.json(denied);
@@ -27,9 +27,8 @@ openimRoutes.post("/openim/login", async (c) => {
   } catch (e) {
     return c.json({ ok: false, error: String(e) });
   }
-});
-
-openimRoutes.post("/openim/conversations", async (c) => {
+})
+  .post("/openim/conversations", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const token = String(body.token ?? ""), userId = String(body.user_id ?? "");
   if (!token || !userId) return c.json({ ok: false, error: "token/user_id 不能为空" });
@@ -43,11 +42,11 @@ openimRoutes.post("/openim/conversations", async (c) => {
   } catch (e) {
     return c.json({ ok: false, error: String(e) });
   }
-});
+})
 
 // ---- UI 发送入口（网关收敛 Spec）：纯 REST 代发，不落库不跑 AI ----
 
-openimRoutes.post("/openim/send_message", async (c) => {
+  .post("/openim/send_message", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const userId = String(body.user_id ?? "");
   const groupId = String(body.group_id ?? "");
@@ -66,12 +65,11 @@ openimRoutes.post("/openim/send_message", async (c) => {
   const r = await sendMsgAsUser({ userId, groupId, recvId, senderName, text, clientMsgId });
   if (!r.ok) return c.json({ ok: false, error: r.error });
   return c.json({ ok: true, msgId: r.serverMsgId, client_msg_id: clientMsgId });
-});
-
-openimRoutes.post("/openim/get_messages", (c) => c.json({ ok: true, messages: [] }));
+})
+  .post("/openim/get_messages", (c) => c.json({ ok: true, messages: [] }))
 
 // 群名称解析（REST 会话列表不带 showName，前端渲染需要真实群名）
-openimRoutes.post("/openim/group_info", async (c) => {
+  .post("/openim/group_info", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const groupId = String(body.group_id ?? "");
   if (!groupId) return c.json({ ok: false, error: "group_id 不能为空" });
