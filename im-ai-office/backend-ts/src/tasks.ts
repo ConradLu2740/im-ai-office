@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./db/drizzle.js";
 import { reminderSent, task } from "./db/schema.js";
 import { auditLog, getTaskDict, type TaskRow } from "./repos.js";
@@ -8,7 +8,7 @@ import { fanout } from "./sse.js";
 
 export const CANCELLED = "cancelled";
 
-const touch = { updatedAt: new Date() };
+const touch = { updatedAt: sql`NOW()` };
 
 export async function confirmTask(taskId: number, assignee?: string | null, _deadline?: string | null): Promise<boolean> {
   const t = await getTaskDict(taskId);
