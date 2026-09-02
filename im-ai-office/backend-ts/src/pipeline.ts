@@ -1,6 +1,8 @@
 import { z } from "zod";
-import { query } from "./db.js";
-import { auditLog, distinctAliasNames, findPersonsByAlias, insertTask, type TaskRow } from "./repos.js";
+import { and, desc, eq, like } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { TASK_COLS, auditLog, distinctAliasNames, findPersonsByAlias, insertTask, type TaskRow } from "./repos.js";
+import { task as taskT } from "./db/schema.js";
 import { getLlm } from "./llm.js";
 import { buildSysCtx } from "./memory.js";
 import { fanout } from "./sse.js";
@@ -92,8 +94,9 @@ type PersonRow = { id: number; real_name: string | null; flower_name: string | n
 export async function handleCompletion(msg: string, sender: string, contentHint?: string | null): Promise<TaskRow | null> {
   const s = (sender ?? "").trim();
   if (!s) return null;
-  const tasks = await query<TaskRow>(
-    "SELECT * FROM task WHERE status='confirmed' AND assignee LIKE $1 ORDER BY id DESC", [`%${s}%`]);
+  const tasks = await db.select(TASK_COLS).from(taskT)
+    .where(and(eq(taskT.status, "confirmed"), like(taskT.assignee, `%${s}%`)))
+    .orderBy(desc(taskT.id)) as unknown as TaskRow[];
   if (!tasks.length) return null;
   const hint = (contentHint ?? "").trim();
   let picked = null as TaskRow | null;

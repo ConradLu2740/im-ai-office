@@ -1,5 +1,7 @@
 import { config } from "./config.js";
-import { query, one } from "./db.js";
+import { and, eq } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { message } from "./db/schema.js";
 import { auditLog, messageAdd } from "./repos.js";
 import { fanout } from "./sse.js";
 import { processMessage, auditAiProcessed } from "./pipeline.js";
@@ -48,9 +50,9 @@ export async function handleOpenimCallback(payload: Record<string, unknown>): Pr
 
     // 永久幂等闸门：同 clientMsgID 已入库 → 已被处理（防 OpenIM 重投递）
     if (clientMsgId) {
-      const seen = await one(
-        "SELECT 1 FROM message WHERE conv_id=$1 AND client_msg_id=$2 LIMIT 1", [`sg_${grpId}`, clientMsgId]);
-      if (seen) return { ok: true, handled: true, action: "client_msg_id_seen" };
+      const seen = await db.select({ x: message.id }).from(message)
+        .where(and(eq(message.convId, `sg_${grpId}`), eq(message.clientMsgId, clientMsgId))).limit(1);
+      if (seen.length) return { ok: true, handled: true, action: "client_msg_id_seen" };
     }
     await messageAdd(`sg_${grpId}`, senderId, senderNickname, contentClean, 0, null, clientMsgId || null);
 
@@ -91,4 +93,4 @@ export async function handleOpenimCallback(payload: Record<string, unknown>): Pr
   return { ok: true, handled: false };
 }
 
-export function callbackDisabledNote(): string { void config; void query; void auditLog; return ""; }
+export function callbackDisabledNote(): string { void config; void auditLog; return ""; }

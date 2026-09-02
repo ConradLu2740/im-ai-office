@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { query, one } from "../db.js";
+import { and, eq } from "drizzle-orm";
+import { db } from "../db/drizzle.js";
+import { message } from "../db/schema.js";
 import { auditLog, messageAdd, messageList, insertTask } from "../repos.js";
 import { processMessage, auditAiProcessed } from "../pipeline.js";
 import { deterministicMsgId, isDuplicate, markConsumed } from "../sse.js";
@@ -74,9 +76,9 @@ taskRoutes.post("/api/sdk_message", async (c) => {
   const msgId = String(body.msg_id ?? "") || deterministicMsgId(convId, sender, text);
   const clientMsgId = String(body.client_msg_id ?? "").trim();
   if (clientMsgId) {
-    const seen = await one(
-      "SELECT 1 FROM message WHERE conv_id=$1 AND client_msg_id=$2 LIMIT 1", [convId, clientMsgId]);
-    if (seen) return c.json({ ok: true, dedup: true, msg_id: msgId, reason: "client_msg_id_seen" });
+    const seen = await db.select({ x: message.id }).from(message)
+      .where(and(eq(message.convId, convId), eq(message.clientMsgId, clientMsgId))).limit(1);
+    if (seen.length) return c.json({ ok: true, dedup: true, msg_id: msgId, reason: "client_msg_id_seen" });
   }
   if (await isDuplicate(msgId)) {
     await auditLog("entry", "ai_dedup_skip", { msgId, source: "sdk" });
@@ -147,4 +149,4 @@ taskRoutes.patch("/api/tasks/:task_id", async (c) => {
   if (err) return c.json({ ok: false, error: err }, 400);
   return c.json({ ok: true, task });
 });
-void insertTask; void query;
+void insertTask;

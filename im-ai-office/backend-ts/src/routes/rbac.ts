@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { checkAdmin } from "../deps.js";
-import { one, query } from "../db.js";
 import { auditLog } from "../repos.js";
 import { canDo, decideApproval, getRole, listRoles, listApprovals, requireApproval, setRole } from "../rbac.js";
 import { openimClient } from "../openim.js";
@@ -67,4 +66,4 @@ rbacRoutes.post("/api/notify/request", async (c) => {
     return c.json({ ok: false, error: String(e) });
   }
 });
-void auditLog; void query; void one;
+void auditLog;
