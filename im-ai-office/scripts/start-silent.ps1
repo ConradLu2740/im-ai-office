@@ -1,5 +1,6 @@
 # IMAI silent starter - executed by the "IMAI Autostart" scheduled task (or manually).
-# Starts backend (uvicorn, no --reload) + gateway, hidden windows, idempotent port cleanup.
+# Starts backend (uvicorn, no --reload) only; gateway removed (consolidated into backend, 2026-09-02).
+# Hidden windows, idempotent port cleanup.
 # NOT a dev tool: use scripts/dev.ps1 for development (reload + web sync watcher).
 param([string]$Root = "")
 
@@ -21,16 +22,11 @@ Start-Process python -ArgumentList "-m", "uvicorn", "app:app", "--host", "127.0.
     -RedirectStandardOutput (Join-Path $Root "backend.log") `
     -RedirectStandardError (Join-Path $Root "backend.err.log")
 
-Start-Process node -ArgumentList "desktop\src\msg_gateway.bundle.cjs" `
-    -WorkingDirectory $Root -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $Root "gateway.log") `
-    -RedirectStandardError (Join-Path $Root "gateway.err.log")
-
-# Backend auto-logins the gateway (_gateway_auto_login); wait and verify, log result
+# Wait and verify backend, log result (gateway removed 2026-09-02; live messages ride OpenIM callback + SSE)
 Start-Sleep -Seconds 8
 try {
-    $gw = Invoke-RestMethod -Uri "http://127.0.0.1:8400/gw/ping" -TimeoutSec 5
-    $connected = $gw.connected
-} catch { $connected = $false }
-"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') autostart done, gateway connected=$connected" |
+    $r = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/roles" -TimeoutSec 5
+    $ok = $r.ok
+} catch { $ok = $false }
+"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') autostart done, backend ok=$ok" |
     Add-Content (Join-Path $Root "autostart.log")

@@ -197,8 +197,6 @@ function logout() {
 // ============ OpenIM SDK 实时消息 ============
 let sdk = null;
 let connected = false;
-let msgCount = 0;
-let lastMsgSeq = 0;
 let pollTimer = null;
 
 function setSDKStatus(text, ok) {
@@ -209,70 +207,43 @@ function setSDKStatus(text, ok) {
 }
 
 async function initSDK(userID, token) {
-  // 网关凭证由后端启动时的 gateway_auto_login 管理（user001, Web/5），
-  // 前端不再拿 UI token 调 /gw/login —— Web SDK 平台固定，异平台 token 会永远连不上；
-  // 且 UI 登录签发的新 token 会顶掉网关旧 token（互踢）。这里只等网关就绪（最多 30s）。
-  setSDKStatus("网关连接中...", false);
-  let up = false;
-  for (let i = 0; i < 15; i++) {
-    try {
-      const ping = await api("/gw/ping", { method: "GET" });
-      if (ping !== undefined) { up = true; break; }
-    } catch (e) {}
-    setSDKStatus(`网关连接中... ${i * 2}s`, false);
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  if (!up) { setSDKStatus("网关未就绪：请稍后重启应用重试", false); return; }
-  await loadGatewayConversations();
-  setSDKStatus("IM 已连接 ✅", true);
-  startPoll();
+  // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供（initSSE），
+  // 会话列表走后端 REST（loadConversations）。此函数仅保留入口语义。
+  setSDKStatus("IM 连接中...", false);
+  loadConversations();
+  startSelfHeal();
 }
 
-async function loadGatewayConversations() {
-  try {
-    const res = await api("/gw/conversations", { method: "GET" });
-    if (res.ok) renderSessions(res.conversations || []);
-    else setSDKStatus("会话加载失败：" + (res.error || "") + "（可点会话栏刷新）", false);
-  } catch (e) { setSDKStatus("会话加载异常：" + (e?.message||e), false); }
-}
-
-function startPoll() {
+// SSE 断线/丢帧自愈：定期刷新会话列表（原 15s 自愈逻辑保留，数据源换后端 REST）
+function startSelfHeal() {
   if (pollTimer) clearInterval(pollTimer);
-  let pollTick = 0;
+  let tick = 0;
   pollTimer = setInterval(async () => {
-    try {
-      const res = await api(`/gw/poll?since=${lastMsgSeq}`, { method: "GET" });
-      if (res.ok && res.messages && res.messages.length) {
-        res.messages.forEach(m => renderGWMessage(m));
-        lastMsgSeq = res.lastSeq || lastMsgSeq;
-        msgCount += res.messages.length;
-        setSDKStatus(`IM 已连接 ✅ · 收 ${msgCount} 条`, true);
-      }
-    } catch (e) {}
-    // 每 ~15s 自愈刷新一次会话列表（SDK 晚同步/中途异常都能恢复）
-    if (++pollTick % 10 === 0) { try { loadGatewayConversations(); } catch (_) {} }
+    if (++tick % 10 === 0) { try { loadConversations(); } catch (_) {} }
   }, 1500);
 }
 
-function renderSessions(convs) {
+function renderConversations(list) {
   const box = document.getElementById("sessionList");
-  if (!box) return;
-  // 网关 /gw/conversations 的 conversations 是 SDK 事件包装对象（真数组在 .data）；REST 路径则是数组
-  const arr = Array.isArray(convs) ? convs : ((convs && convs.data) || []);
   let html = `<div class="session" id="aiSession" data-action="selectAISession">
       <div class="avatar ai">AI</div>
-      <div class="session-info"><div class="session-title">AI 助手</div><div class="session-preview">任务确认与提醒</div></div>
+      <div class="session-info">
+        <div class="session-title">AI 助手</div>
+        <div class="session-preview" id="aiPreview">任务确认与提醒</div>
+      </div>
       <div class="session-meta"><span class="badge" id="aiUnread" style="display:none">0</span></div>
     </div>`;
-  html += arr.map(c => {
-    const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话"));
+  html += (list || []).map(c => {
+    const name = c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "未知会话"));
     const type = c.conversationType === 3 ? 3 : 1;
     let last = "";
     try { last = c.latestMsg ? (JSON.parse(c.latestMsg)?.textElem?.content || "") : ""; } catch (_) {}
     return `<div class="session" data-action="selectConversation" data-conv-id="${escAttr(c.conversationID)}" data-target-id="${escAttr(c.groupID || c.userID)}" data-name="${escAttr(name)}" data-type="${type}">
       <div class="avatar">${name.slice(0,1)}</div>
-      <div class="session-info"><div class="session-title">${name}</div>
-      <div class="session-preview">${last || "暂无消息"}</div></div>
+      <div class="session-info">
+        <div class="session-title">${name}</div>
+        <div class="session-preview">${last || "暂无消息"}</div>
+      </div>
       <div class="session-meta">${c.unreadCount ? `<span class="badge">${c.unreadCount}</span>` : ""}</div>
     </div>`;
   }).join("");
@@ -309,7 +280,7 @@ function renderGWMessage(m) {
   box.scrollTop = box.scrollHeight;
 }
 
-function renderConversationsFromSDK(convs) { renderSessions(convs || []); }
+// 网关收敛后无 SDK 版会话渲染（原 renderConversationsFromSDK 已删，网关收敛Spec §3-1）
 
 function handleSDKMessage(m) {
   renderGWMessage(m);
@@ -429,7 +400,8 @@ async function loadMessageHistory(convId) {
     _seenMsgIDs.clear();
     (res.messages || []).forEach(m => {
       if (m.client_msg_id) _seenMsgIDs.add(m.client_msg_id);
-      const self = m.is_self == 1;
+      // self 判断：is_self 兼容旧数据 + sender_id 比对（网关收敛Spec §3-6，修 own-history 显示）
+      const self = m.is_self == 1 || m.sender_id === currentUser;
       const d = document.createElement("div");
       d.className = "msg" + (self ? " self" : "");
       d.innerHTML = `<div class="avatar">${(self ? "我" : (m.sender_name || "?")).slice(0,1)}</div>
@@ -513,30 +485,23 @@ async function sendMsg() {
     return;
   }
 
-  // 群聊/单聊：调网关发送（双工）
+  // 群聊/单聊：后端 REST 代发（网关收敛Spec §3-4），不落库不跑 AI——回调是唯一入口
   try {
-    const payload = {
-      content: text,
-    };
+    const payload = { user_id: currentUser, sender_name: currentUser, text, client_msg_id: cmid };
     if (currentConversation.type === 3) {
       payload.groupID = currentConversation.targetId;
     } else {
       payload.recvID = currentConversation.targetId;
     }
-    // 统一去重键：/gw/send 缓冲与 /api/sdk_message 落库共用同一个 client_msg_id，
-    // 避免轮询渲染与历史加载各画一份（2026-08-31 重复气泡修复）
-    // cmid 已在本地回显前生成并登记（2026-09-01），此处复用
-    const res = await api("/gw/send", { method: "POST", body: JSON.stringify({ ...payload, client_msg_id: cmid }) });
+    // cmid 已在本地回显前生成并登记（2026-09-01）；回调 SSE 回声携带同 cmid，_seenMsgIDs 拦截
+    const res = await api("/openim/send_message", { method: "POST", body: JSON.stringify(payload) });
     if (!res.ok) {
-      showToast("发送失败：" + (res.error || "网关未连接"), false);
+      showToast("发送失败：" + (res.error || ""), false);
     } else {
-      // 后端 AI 识别
-      try {
-        const aiRes = await api("/api/sdk_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender: currentUser, text, conv_id: currentConversation.id, send_id: currentUser, client_msg_id: cmid }) });
-        if (aiRes && aiRes.ai) { renderAICard(aiRes.ai); loadTasks(); }
-      } catch(e) {}
+      // 回声配对：OpenIM 会重新生成 clientMsgID（不回传传入值），SSE 回声改按 serverMsgID 去重
+      if (res.msgId) _seenMsgIDs.add("srv:" + res.msgId);
     }
-    // 发送后刷新看板
+    // 发送后刷新看板与 AI 未读（确认卡经 ai.card SSE / AI 助手会话到达）
     setTimeout(loadTasks, 1500);
     updateAIUnread();
   } catch (e) {
@@ -859,13 +824,12 @@ async function loadMemory() {
 // ============ 迭代3 B4：历史消息挖掘 ============
 
 async function mineRefresh() {
-  // 会话下拉：与纪要页同源缓存（/gw/conversations），空则拉一次
+  // 会话下拉：与纪要页同源缓存（后端 REST，网关收敛后替代 /gw/conversations），空则拉一次
   if (!_minutesConvs.length) {
     try {
-      const res = await api("/gw/conversations", { method: "GET" });
+      const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
       if (res.ok) {
-        const arr = Array.isArray(res.conversations) ? res.conversations : ((res.conversations && res.conversations.data) || []);
-        _minutesConvs = arr.map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
+        _minutesConvs = (res.conversations || []).map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
       }
     } catch (_) {}
   }
@@ -994,12 +958,11 @@ async function deleteTerm(term, btn) {
 let _minutesConvs = []; // {id, name} 缓存，供下拉与卡片显示会话名
 
 async function loadMinutes() {
-  // 会话下拉：与左侧会话列表同源（/gw/conversations）
+  // 会话下拉：与左侧会话列表同源（后端 REST）
   try {
-    const res = await api("/gw/conversations", { method: "GET" });
+    const res = await api("/openim/conversations", { method: "POST", body: JSON.stringify({ token: currentToken, user_id: currentUser }) });
     if (res.ok) {
-      const arr = Array.isArray(res.conversations) ? res.conversations : ((res.conversations && res.conversations.data) || []);
-      _minutesConvs = arr.map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
+      _minutesConvs = (res.conversations || []).map(c => ({ id: c.conversationID, name: c.showName || (c.groupID ? `群 ${c.groupID}` : (c.userID || "会话")) }));
     }
   } catch (_) {}
   const sel = document.getElementById("minutesConv");
@@ -1083,17 +1046,46 @@ function renderAICard(r) {
   box.scrollTop = box.scrollHeight;
 }
 
-// Step2 实时事件（SSE，后端 async 模式才有事件；sync 模式下 EventSource 会静默重试、无影响）
+// 实时事件（网关收敛后：SSE 是唯一实时通道，消息/任务/卡片都走这里）
 let esAI = null;
+let _lastReconnectRefresh = 0;
 function initSSE() {
   if (!window.EventSource || esAI) return;
   try {
     esAI = new EventSource(API_BASE + "/api/events/stream");
+    esAI.onopen = () => {
+      setSDKStatus("IM 已连接 ✅", true);
+      // 断线重连/首连：全量刷新兔丢帧（离线消息靠 DB，历史是唯一渲染权威）
+      const now = Date.now();
+      if (now - _lastReconnectRefresh > 5000) {
+        _lastReconnectRefresh = now;
+        loadConversations();
+        if (currentConversation && currentConversation.id && currentConversation.type !== "ai") {
+          loadMessageHistory(currentConversation.id);
+        }
+        updateAIUnread();
+      }
+    };
     esAI.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data);
+        if (ev.type === "message") {
+          // 回调落库后的实时回声；先按 serverMsgID 配对本地回声（发送响应里登记的 srv: 键）
+          const srvKey = ev.server_msg_id ? "srv:" + ev.server_msg_id : "";
+          if (srvKey && _seenMsgIDs.has(srvKey)) { /* 已有本地回声，不重复渲染 */ }
+          else {
+            renderGWMessage({
+              sendID: ev.send_id,
+              senderNickname: ev.sender_nickname,
+              content: ev.content,
+              clientMsgID: ev.client_msg_id || ev.server_msg_id,
+              conversationID: ev.conv_id,
+              sendTime: ev.send_time || ev.ts || Date.now(),
+            });
+          }
+        }
         if (ev.type === "task_created" || ev.type === "ai.card") loadTasks();
-        if (ev.type === "task_created") updateAIUnread();
+        if (ev.type === "task_created" || ev.type === "ai.card") updateAIUnread();
       } catch (_) {}
     };
     // EventSource 断线自动重连；无需手动重建

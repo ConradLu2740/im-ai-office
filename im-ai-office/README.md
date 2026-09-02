@@ -5,9 +5,9 @@
 ## 架构一句话
 
 ```
-OpenIM(单独部署) --Webhook/SDK网关--> 后端(FastAPI) --> AI 识别/消歧/确认卡 → 看板/提醒
+OpenIM(单独部署) --Webhook 回调--> 后端(FastAPI，UI 数据面内聚) --> AI 识别/消歧/确认卡 → 看板/提醒
                                               |
-               Postgres/SQLite + Redis + LLM Provider(云端/本地可切换)
+               Postgres/SQLite + Redis + LLM Provider(云端/本地可切换)；前端经 SSE 收实时消息、REST 代发消息（无独立网关进程）
 ```
 
 ## 代码分层（2026-08-27 Step1 拆层重组）
@@ -75,11 +75,11 @@ docker compose exec -T postgres psql -U imai -d imai -f /schema.sql
 ### 3. 启动 AI 服务
 
 > ⚠️ 本节为旧架构描述。**当前实际启动方式（2026-08-31 起）**：
-> - 开发：`powershell -File scripts\dev.ps1`（uvicorn --reload + 网关 + web 同步监听）
+> - 开发：`powershell -File scripts\dev.ps1`（uvicorn --reload + web 同步监听）
 > - 无头：`python cli.py up / status / down`
 > - 自启开关：`powershell -File scripts\autostart.ps1 -Action enable|disable|status`
 >   （默认 **OFF** 不自启；enable 后注册当前用户登录计划任务「IMAI Autostart」，
->   由 `scripts/start-silent.ps1` 静默拉起后端+网关，不含 OpenIM server）
+>   由 `scripts/start-silent.ps1` 静默拉起后端，不含 OpenIM server）
 
 ```bash
 # 本地 LLM 之前用云端，配置见 .env（OPENAI_API_KEY 或自建兼容端点）

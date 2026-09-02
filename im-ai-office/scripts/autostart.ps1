@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action status   # default
 #   powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action enable   # register logon task
 #   powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action disable  # unregister
-# Scope: backend + gateway only (OpenIM server is a separate docker deployment, out of scope).
+# Scope: backend only (gateway removed 2026-09-02; OpenIM server is a separate docker deployment, out of scope).
 param(
     [ValidateSet("enable", "disable", "status")][string]$Action = "status",
     [string]$Root = ""
@@ -35,7 +35,7 @@ switch ($Action) {
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
             -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
         Register-ScheduledTask -TaskName $taskName -Trigger $trigger -Action $taskAction `
-            -Settings $settings -Description "IMAI backend+gateway silent start at logon" | Out-Null
+            -Settings $settings -Description "IMAI backend silent start at logon" | Out-Null
         Write-Host "[autostart] ON. Task '$taskName' registered (at logon, current user)." -ForegroundColor Green
         Write-Host "[autostart] Note: takes effect at next logon. Start now manually: powershell -File scripts\start-silent.ps1"
     }

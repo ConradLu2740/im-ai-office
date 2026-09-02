@@ -16,9 +16,6 @@ WEB_DIR = ROOT / "web"
 
 def create_app() -> FastAPI:
     """组装应用：中间件、路由、启动任务。"""
-    import json as _json
-    import os as _os
-    from fastapi import Request, Response
     from imai.api import deps
     app = FastAPI(title="对话式 AI 办公 · MVP")
 
@@ -43,28 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_stats.router)
     app.include_router(routes_mine.router)
 
-    # 浏览器访问模式：/gw/* 同源反代到消息网关（默认 127.0.0.1:8400），免去跨域
-    GATEWAY_URL = _os.environ.get("IMAI_GATEWAY_URL", "http://127.0.0.1:8400")
-
-    @app.api_route("/gw/{rest:path}", methods=["GET", "POST"])
-    async def gw_proxy(rest: str, request: Request):
-        body = await request.body()
-        import urllib.request as _ur
-        # ⚠️ 必须透传 query string：/gw/poll?since=N 的游标若被丢弃，网关会按 since=0
-        # 每次轮询全量回放 msgBuffer，前端去重又依赖 clientMsgID（旧缓冲条目没有），
-        # 最终表现为聊天区同一消息每 1.5s 重复渲染一条（2026-08-31 实证）。
-        qs = ("?" + request.url.query) if request.url.query else ""
-        req = _ur.Request(f"{GATEWAY_URL}/gw/{rest}{qs}", data=body or None,
-                          headers={"Content-Type": request.headers.get("content-type", "application/json")},
-                          method=request.method)
-        try:
-            with _ur.urlopen(req, timeout=35) as resp:
-                return Response(content=resp.read(), status_code=resp.status,
-                                media_type=resp.headers.get("content-type", "application/json"))
-        except Exception as e:
-            return Response(content=_json.dumps({"ok": False, "error": str(e)}),
-                            status_code=200, media_type="application/json")
-
+    # 浏览器访问模式：/gw 反代已随网关收敛删除（网关收敛Spec，2026-09-02）
     @app.get("/", response_class=HTMLResponse)
     def index():
         web_index = WEB_DIR / "index.html"
@@ -79,7 +55,7 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def _on_startup():
         from imai import config as _cfg
-        routes_openim.gateway_auto_login()
+        # gateway_auto_login 已随网关收敛删除（网关收敛Spec §2-3）
         # Step2：async 模式启动 AI worker 内嵌线程；Redis 不可达自动降级 sync（Spec §5）
         if _cfg.AI_MODE == "async":
             from imai import worker
