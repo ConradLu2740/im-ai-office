@@ -31,8 +31,8 @@ imai/
 tests/guard + tests/eval   回归安全网（26 断言 ≤0.2s；Eval 首轮基线 19/20，见《回归加固Spec.md》）
 ```
 
-> ⚠️ **桌面打包注意**：tauri.conf.json 的 bundle.resources 已含 `../../imai` 目录映射；
-> 打包机上需重新执行 tauri build 验证（Step1 重构无法在本机完成完整打包验证）。
+> ⚠️ **桌面打包（2026-09-02 起 Electron）**：`electron/` 壳（托盘/通知/自启/后端生命周期），
+> 打包 `npm run build:electron && npx electron-builder --win`；Tauri 已退役（desktop/ 删除）
 
 ## 组成
 
@@ -56,7 +56,7 @@ tests/guard + tests/eval   回归安全网（26 断言 ≤0.2s；Eval 首轮基�
 | `IMAI_AI_MODE` | `async` 启用 Redis 事件化 AI（见《事件化异步Spec.md》） | sync |
 | `DATABASE_URL` | Postgres 连接串（设置且无 IMAI_DB 时启用） | SQLite |
 
-⚠️ 桌面打包前需 `tauri build` 人工验证（tauri.conf resources/CSP 有变更）。
+⚠️ 桌面打包已改 Electron（`electron/`，实测全绿）；tauri 相关条目作废。
 
 ## 快速开始
 
