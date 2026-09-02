@@ -1,28 +1,45 @@
-import { one, query, insertReturningId } from "./db.js";
+import { and, desc, eq, ne, isNotNull, sql } from "drizzle-orm";
+import { db } from "./db/drizzle.js";
+import { aiDm, alias, audit, message, person, task, term } from "./db/schema.js";
+
+// 数据访问层（Drizzle 查询构建器；行为与手写 SQL 版逐字等价，返回键保持 snake_case）
 
 // ============ 人 / 别名 ============
 
 export interface Person { id: number; real_name: string | null; flower_name: string | null; }
 
 export async function findPersonsByAlias(name: string): Promise<Person[]> {
-  return query<Person>(
-    "SELECT p.id, p.real_name, p.flower_name FROM alias a JOIN person p ON p.id=a.person_id WHERE a.name=$1", [name]);
+  return db.select({
+    id: person.id,
+    real_name: person.realName,
+    flower_name: person.flowerName,
+  })
+    .from(alias)
+    .innerJoin(person, eq(person.id, alias.personId))
+    .where(eq(alias.name, name));
 }
 
 export async function distinctAliasNames(): Promise<string[]> {
-  const rows = await query<{ name: string }>("SELECT DISTINCT name FROM alias");
-  return rows.map((r) => r.name);
+  const rows = await db.selectDistinct({ name: alias.name }).from(alias);
+  return rows.map((r) => r.name!);
 }
 
 export async function aliasLabelRows(): Promise<Array<{ name: string; real_name: string | null; flower_name: string | null }>> {
-  return query("SELECT DISTINCT a.name, p.real_name, p.flower_name FROM alias a JOIN person p ON p.id=a.person_id");
+  return db.selectDistinct({
+    name: alias.name,
+    real_name: person.realName,
+    flower_name: person.flowerName,
+  })
+    .from(alias)
+    .innerJoin(person, eq(person.id, alias.personId)) as Promise<Array<{ name: string; real_name: string | null; flower_name: string | null }>>;
 }
 
 export async function insertAliasIfAbsent(personId: number, name: string): Promise<boolean> {
-  const hit = await one("SELECT 1 FROM alias WHERE person_id=$1 AND name=$2", [personId, name]);
-  if (hit) return false;
-  await query("INSERT INTO alias(person_id, name) VALUES($1,$2)", [personId, name]);
-  return true;
+  const inserted = await db.insert(alias)
+    .values({ personId, name })
+    .onConflictDoNothing()
+    .returning({ id: alias.id });
+  return inserted.length > 0;
 }
 
 // ============ 任务 ============
@@ -34,38 +51,59 @@ export interface TaskRow {
   created_at: Date | string; updated_at: Date | string | null;
 }
 
+type TaskSelect = {
+  id: typeof task.id; content: typeof task.content; creator: typeof task.creator;
+  assignee: typeof task.assignee; deadline: typeof task.deadline; deadline_at: typeof task.deadlineAt;
+  status: typeof task.status; confidence: typeof task.confidence; source_msg: typeof task.sourceMsg;
+  pending_meta: typeof task.pendingMeta; created_at: typeof task.createdAt; updated_at: typeof task.updatedAt;
+};
+const TASK_COLS: TaskSelect = {
+  id: task.id, content: task.content, creator: task.creator,
+  assignee: task.assignee, deadline: task.deadline, deadline_at: task.deadlineAt,
+  status: task.status, confidence: task.confidence, source_msg: task.sourceMsg,
+  pending_meta: task.pendingMeta, created_at: task.createdAt, updated_at: task.updatedAt,
+};
+
 export async function insertTask(
   content: string, creator: string, assignee: string | null, deadline: string | null,
   status: string, confidence: string, sourceMsg: string, pendingMeta: string | null = null
 ): Promise<number> {
-  if (pendingMeta !== null) {
-    return insertReturningId(
-      "INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg,pending_meta) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-      [content, creator, assignee, deadline, status, confidence, sourceMsg, pendingMeta]);
-  }
-  return insertReturningId(
-    "INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
-    [content, creator, assignee, deadline, status, confidence, sourceMsg]);
+  const rows = await db.insert(task)
+    .values(pendingMeta !== null
+      ? { content, creator, assignee, deadline, status, confidence, sourceMsg, pendingMeta }
+      : { content, creator, assignee, deadline, status, confidence, sourceMsg })
+    .returning({ id: task.id });
+  return rows[0].id;
 }
 
 export async function getTaskDict(taskId: number): Promise<TaskRow | null> {
-  return one<TaskRow>("SELECT * FROM task WHERE id=$1", [taskId]);
+  const rows = await db.select(TASK_COLS).from(task).where(eq(task.id, taskId)).limit(1);
+  return (rows[0] as unknown as TaskRow) ?? null;
 }
 
 export async function listTaskDicts(status?: string): Promise<TaskRow[]> {
-  if (status) return query<TaskRow>("SELECT * FROM task WHERE status=$1 ORDER BY id DESC", [status]);
-  return query<TaskRow>("SELECT * FROM task WHERE status != 'cancelled' ORDER BY id DESC");
+  if (status) {
+    return db.select(TASK_COLS).from(task).where(eq(task.status, status)).orderBy(desc(task.id)) as unknown as Promise<TaskRow[]>;
+  }
+  return db.select(TASK_COLS).from(task).where(ne(task.status, "cancelled")).orderBy(desc(task.id)) as unknown as Promise<TaskRow[]>;
 }
 
 export async function latestPendingAssigneeForCreator(creator: string): Promise<TaskRow | null> {
-  return one<TaskRow>("SELECT * FROM task WHERE creator=$1 AND status='pending_assignee' ORDER BY id DESC LIMIT 1", [creator]);
+  const rows = await db.select(TASK_COLS).from(task)
+    .where(and(eq(task.creator, creator), eq(task.status, "pending_assignee")))
+    .orderBy(desc(task.id)).limit(1);
+  return (rows[0] as unknown as TaskRow) ?? null;
 }
 
 export async function latestPendingAssigneeByDmTaskid(senderId: string): Promise<TaskRow | null> {
-  const dm = await one<{ task_id: number }>(
-    "SELECT task_id FROM ai_dm WHERE sender_id=$1 AND task_id IS NOT NULL ORDER BY id DESC LIMIT 1", [senderId]);
-  if (!dm) return null;
-  return one<TaskRow>("SELECT * FROM task WHERE id=$1 AND status='pending_assignee' ORDER BY id DESC LIMIT 1", [dm.task_id]);
+  const dm = await db.select({ task_id: aiDm.taskId }).from(aiDm)
+    .where(and(eq(aiDm.senderId, senderId), isNotNull(aiDm.taskId)))
+    .orderBy(desc(aiDm.id)).limit(1);
+  if (!dm.length || dm[0].task_id == null) return null;
+  const rows = await db.select(TASK_COLS).from(task)
+    .where(and(eq(task.id, dm[0].task_id), eq(task.status, "pending_assignee")))
+    .orderBy(desc(task.id)).limit(1);
+  return (rows[0] as unknown as TaskRow) ?? null;
 }
 
 // ============ 消息表 ============
@@ -81,37 +119,45 @@ export async function messageAdd(
   isSelf = 0, msgSeq: number | null = null, clientMsgId: string | null = null, contentType = 101
 ): Promise<number> {
   if (clientMsgId) {
-    const hit = await one<{ id: number }>(
-      "SELECT id FROM message WHERE conv_id=$1 AND client_msg_id=$2 LIMIT 1", [convId, clientMsgId]);
-    if (hit) return Number(hit.id);
+    const hit = await db.select({ id: message.id }).from(message)
+      .where(and(eq(message.convId, convId), eq(message.clientMsgId, clientMsgId)))
+      .limit(1);
+    if (hit.length) return Number(hit[0].id);
   }
-  return insertReturningId(
-    "INSERT INTO message(conv_id, sender_id, sender_name, content, is_self, msg_seq, client_msg_id, content_type) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-    [convId, senderId, senderName, content, isSelf, msgSeq, clientMsgId, contentType]);
+  const rows = await db.insert(message)
+    .values({ convId, senderId, senderName, content, isSelf, msgSeq, clientMsgId, contentType })
+    .returning({ id: message.id });
+  return rows[0].id;
 }
 
 export async function messageList(convId?: string): Promise<MessageRow[]> {
-  if (convId) return query<MessageRow>("SELECT * FROM message WHERE conv_id=$1 ORDER BY id ASC", [convId]);
-  return query<MessageRow>("SELECT * FROM message ORDER BY id ASC");
+  const q = db.select({
+    id: message.id, conv_id: message.convId, sender_id: message.senderId,
+    sender_name: message.senderName, content: message.content, content_type: message.contentType,
+    is_self: message.isSelf, msg_seq: message.msgSeq, client_msg_id: message.clientMsgId, ts: message.ts,
+  }).from(message).$dynamic();
+  if (convId) return q.where(eq(message.convId, convId)).orderBy(message.id) as unknown as Promise<MessageRow[]>;
+  return q.orderBy(message.id) as unknown as Promise<MessageRow[]>;
 }
 
 // ============ 审计 ============
 
 export async function auditLog(actor: string, action: string, detail: Record<string, unknown> | null = null): Promise<void> {
-  await query("INSERT INTO audit(actor,action,detail) VALUES($1,$2,$3)",
-    [actor, action, detail ? JSON.stringify(detail) : null]);
+  await db.insert(audit).values({ actor, action, detail: detail ? JSON.stringify(detail) : null });
 }
 
-/** audit 旧 schema（created_at/JSONB）与新 schema（ts/TEXT）运行时兼容——生产库是旧 schema（交接文档 #11）。 */
+/** 生产 audit 已对齐代码 schema（ts + TEXT detail，drizzle 0000 迁移），探测分支退役。 */
 export async function auditRecent(limit = 30): Promise<Array<{ actor: string; action: string; detail: unknown; ts: string }>> {
-  const cols = await query<{ col: string }>(
-    "SELECT column_name AS col FROM information_schema.columns WHERE table_name='audit' AND column_name IN ('ts','created_at')");
-  const names = new Set(cols.map((r) => r.col));
-  const tcol = names.has("ts") ? "ts" : names.has("created_at") ? "created_at" : null;
-  if (!tcol) throw new Error("audit 表缺少时间列（ts/created_at）");
-  const rows = await query<Record<string, unknown>>(
-    `SELECT actor, action, detail, ${tcol} AS ts FROM audit ORDER BY id DESC LIMIT $1`, [limit]);
-  return rows.map((r) => ({ ...r, ts: String(r.ts) })) as Array<{ actor: string; action: string; detail: unknown; ts: string }>;
+  const rows = await db.select({
+    actor: audit.actor, action: audit.action, detail: audit.detail, ts: audit.ts,
+  }).from(audit).orderBy(desc(audit.id)).limit(limit) as unknown as Array<{ actor: string; action: string; detail: unknown; ts: string }>;
+  return rows.map((r) => {
+    let detail: unknown = r.detail;
+    if (typeof detail === "string") {
+      try { detail = JSON.parse(detail); } catch { /* 保持原字符串 */ }
+    }
+    return { actor: r.actor, action: r.action, detail, ts: String(r.ts) };
+  });
 }
 
 // ============ 术语 ============
@@ -119,5 +165,11 @@ export async function auditRecent(limit = 30): Promise<Array<{ actor: string; ac
 export interface TermRow { id: number; term: string; meaning: string; source: string; created_at: Date | string; }
 
 export async function listTermDicts(): Promise<TermRow[]> {
-  return query<TermRow>("SELECT * FROM term ORDER BY id DESC");
+  const rows = await db.select({
+    id: term.id, term: term.term, meaning: term.meaning, source: term.source, created_at: term.createdAt,
+  }).from(term).orderBy(desc(term.id)) as unknown as Promise<TermRow[]>;
+  return rows;
 }
+
+// 保留 sql 模板逃生舱引用（复杂聚合在 stats.ts 使用）
+export const _sql = sql;
