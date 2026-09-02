@@ -5,15 +5,20 @@ import { makeFakeLlm, makeIntent } from "./setup.js";
 import { query, one } from "../src/db.js";
 
 // G 系关键守卫移植（test_g11/g12/g3/g4 精选）：TS 后端的核心不变量
+// P3：发送入口改为 /api/messages/send（内联 AI 闸门），/callback 与 /openim/* 已删除
 
-async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
+async function request(path: string, method: string, body?: unknown, token?: string): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await app.request(path, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    method, headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   return res.json() as Promise<Record<string, unknown>>;
 }
+
+const post = (path: string, body?: unknown, token?: string) => request(path, "POST", body, token);
 
 async function get(path: string): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
@@ -21,44 +26,53 @@ async function get(path: string): Promise<Record<string, unknown>> {
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-describe("G11 · 回调唯一入口 + SSE", () => {
-  it("群消息回调：落库 + fanout message 事件 + 同 clientMsgID 幂等", async () => {
+/** 直插用户 + 会话（send 端点鉴权用），返回 Bearer token */
+async function mkSession(userId: string, displayName = "测试用户"): Promise<string> {
+  const { randomBytes, scryptSync } = await import("node:crypto");
+  const token = randomBytes(32).toString("hex");
+  const passwordHash = `${randomBytes(16).toString("hex")}:${scryptSync("x", "s", 64).toString("hex")}`;
+  await query(
+    "INSERT INTO app_user(id, username, display_name, password_hash) VALUES($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING",
+    [userId, `u-${userId}`, displayName, passwordHash]);
+  await query("INSERT INTO session(token, user_id, expires_at) VALUES($1,$2, NOW() + INTERVAL '1 day')", [token, userId]);
+  return token;
+}
+
+describe("G11 · 发送端点唯一入口 + SSE（P3 闸门平移）", () => {
+  it("send：落库 + fanout message（DB id+client_msg_id）+ AI 内联 + 同 clientMsgID 幂等", async () => {
     makeFakeLlm([{ match: "随便聊聊", intent: makeIntent({ is_task: false, confidence: "low", is_completion: false }) }]);
+    const token = await mkSession("user002", "张三");
     const events: string[] = [];
     const { subscribe, unsubscribe } = await import("../src/sse.js");
     const sink = (line: string) => events.push(line);
     subscribe(sink);
     try {
-      const payload = { msgID: "g11-m1", groupID: "g11grp", sendID: "user002",
-        senderNickname: "张三", contentType: "101", content: "随便聊聊天气", clientMsgID: "cmid-g11-1" };
-      const r1 = await post("/callback", payload);
+      const payload = { conv_id: "sg_g11grp", text: "随便聊聊天气", client_msg_id: "cmid-g11-1" };
+      const r1 = await post("/api/messages/send", payload, token);
       expect(r1.ok).toBe(true);
+      expect(r1.inserted !== false).toBe(true);
       const rows = await query("SELECT * FROM message WHERE conv_id='sg_g11grp' AND client_msg_id='cmid-g11-1'");
       expect(rows.length).toBe(1);
-      const ev = JSON.parse(events.find((e) => e.includes("message")) ?? "{}");
+      const ev = JSON.parse(events.find((e) => e.includes("\"message\"")) ?? "{}");
       expect(ev.conv_id).toBe("sg_g11grp");
       expect(ev.client_msg_id).toBe("cmid-g11-1");
-      // 重投递被闸门拦截
-      const r2 = await post("/callback", payload);
-      expect(r2.action).toBe("client_msg_id_seen");
+      expect(ev.db_id).toBe(rows[0].id);
+      // 同 clientMsgID 重投 → 唯一约束幂等（dedup:true，不重复落库、不重复跑 AI）
+      const r2 = await post("/api/messages/send", payload, token);
+      expect(r2.ok).toBe(true);
+      expect(r2.dedup).toBe(true);
       expect((await query("SELECT COUNT(*)::int AS n FROM message WHERE client_msg_id='cmid-g11-1'"))[0].n).toBe(1);
     } finally { unsubscribe(sink); }
   });
 
-  it("send_message：纯代发不落库不建任务 + 透传 clientMsgID + 审计", async () => {
-    const { setOpenimPost } = await import("../src/openim.js");
-    setOpenimPost(() => Promise.resolve({ errCode: 0, data: { serverMsgID: "srv-g11" } }));
-    const r = await post("/openim/send_message", {
-      user_id: "user001", group_id: "g1", sender_name: "user001",
-      text: "安排个事", client_msg_id: "cmid-send-1" });
-    expect(r.ok).toBe(true);
-    expect((await query("SELECT COUNT(*)::int AS n FROM message WHERE client_msg_id='cmid-send-1'"))[0].n).toBe(0);
-    expect((await query("SELECT COUNT(*)::int AS n FROM task"))[0].n).toBe(0);
-    const audits = await query("SELECT actor FROM audit WHERE action='send_message'");
-    expect(audits[0].actor).toBe("user:user001");
-    // 缺 client_msg_id 拒绝
-    const bad = await post("/openim/send_message", { user_id: "user001", group_id: "g1", text: "hi" });
-    expect(bad.ok).toBe(false);
+  it("send 守卫：未认证拒绝 + 缺 client_msg_id 拒绝 + 非 sg_ 会话拒绝", async () => {
+    const token = await mkSession("user003", "李四");
+    const noAuth = await post("/api/messages/send", { conv_id: "sg_x", text: "hi", client_msg_id: "c-1" });
+    expect(noAuth.ok).toBe(false);
+    const noCmid = await post("/api/messages/send", { conv_id: "sg_x", text: "hi" }, token);
+    expect(noCmid.ok).toBe(false);
+    const badConv = await post("/api/messages/send", { conv_id: "dm_x", text: "hi", client_msg_id: "c-2" }, token);
+    expect(badConv.ok).toBe(false);
   });
 });
 
@@ -85,14 +99,16 @@ describe("G12 · 完成回流 + G4 观测", () => {
     const tid = await mkTask("写周报");
     makeFakeLlm([{ match: "周报做完了", intent: makeIntent({ is_task: false, confidence: "low",
       is_completion: true, content: "周报" }) }]);
-    const r = await post("/api/sdk_message", { sender: "user001", text: "周报做完了",
-      conv_id: "sg_g12", send_id: "user001", client_msg_id: "g12-cmid-1" });
+    const token = await mkSession("user001", "user001"); // displayName 与 task.assignee 匹配（同 OpenIM 昵称语义）
+    const r = await post("/api/messages/send", { text: "周报做完了",
+      conv_id: "sg_g12", client_msg_id: "g12-cmid-1" }, token);
     expect((r.ai as Record<string, unknown>).action).toBe("task_completed");
     expect((await one("SELECT status FROM task WHERE id=$1", [tid]))!.status).toBe("done");
     makeFakeLlm([{ match: "另一个事", intent: makeIntent({ is_task: false, confidence: "low",
       is_completion: true, content: "另一个事" }) }]);
-    const r2 = await post("/api/sdk_message", { sender: "nobody999", text: "另一个事搞定了",
-      conv_id: "sg_g12", send_id: "nobody999", client_msg_id: "g12-cmid-2" });
+    const token2 = await mkSession("nobody999");
+    const r2 = await post("/api/messages/send", { text: "另一个事搞定了",
+      conv_id: "sg_g12", client_msg_id: "g12-cmid-2" }, token2);
     expect((r2.ai as Record<string, unknown>).action).toBe("skip");
   });
 
@@ -116,15 +132,16 @@ describe("G3 · RBAC 与确认流", () => {
     expect(n.direct).toBe(false);
     const pending = (await get("/api/approvals?status=pending")).approvals as Array<Record<string, unknown>>;
     expect(pending.length).toBe(1);
-    // admin 批复 → approved + 代发
+    // admin 批复 → approved
     const aid = pending[0].id;
     const d = await post(`/api/approvals/${aid}/decide`, { approved: true, decided_by: "imAdmin" });
     expect((d.approval as Record<string, unknown>).status).toBe("approved");
-    // 识别 → 确认流
+    // 识别 → 确认流（经新发送端点）
     makeFakeLlm([{ match: "我来写周报", intent: makeIntent({ is_task: true, confidence: "high",
       content: "写周报", assignee_hint: "我", deadline_hint: "周五前", assign_mode: "self" }) }]);
-    const ai = await post("/api/sdk_message", { sender: "user001", text: "我来写周报",
-      conv_id: "sg_g3", send_id: "user001", client_msg_id: "g3-cmid-1" });
+    const token = await mkSession("user001");
+    const ai = await post("/api/messages/send", { text: "我来写周报",
+      conv_id: "sg_g3", client_msg_id: "g3-cmid-1" }, token);
     const taskId = ((ai.ai as Record<string, unknown>).task as Record<string, unknown>).taskId as number;
     expect((await post(`/api/tasks/${taskId}/confirm`, {})).ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("confirmed");

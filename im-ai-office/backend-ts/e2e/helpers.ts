@@ -22,10 +22,11 @@ export async function api(
   path: string,
   payload?: unknown,
   method?: "GET" | "POST" | "DELETE",
+  headers: Record<string, string> = {},
 ): Promise<Record<string, unknown>> {
   const res = await fetch(BASE + path, {
     method: method ?? (payload ? "POST" : "GET"),
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: payload ? JSON.stringify(payload) : undefined,
   });
   return (await res.json()) as Record<string, unknown>;

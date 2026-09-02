@@ -104,7 +104,7 @@ export const groupMember = pgTable("group_member", {
 export const userLastRead = pgTable("user_last_read", {
 	userId: text("user_id").notNull(),
 	convId: text("conv_id").notNull(),
-	lastMsgId: text("last_msg_id"),
+	lastMsgId: bigint("last_msg_id", { mode: "number" }),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
 }, (table) => [
 	primaryKey({ columns: [table.userId, table.convId], name: "pk_user_last_read" }),

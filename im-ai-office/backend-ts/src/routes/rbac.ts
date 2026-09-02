@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { checkAdmin } from "../deps.js";
 import { auditLog } from "../repos.js";
 import { canDo, decideApproval, getRole, listRoles, listApprovals, requireApproval, setRole } from "../rbac.js";
-import { openimClient } from "../openim.js";
+import { fanout } from "../sse.js";
 
 export const rbacRoutes = new Hono()
 
@@ -36,13 +36,9 @@ export const rbacRoutes = new Hono()
   const body = await c.req.json().catch(() => ({}));
   const { row, detail } = await decideApproval(id, Boolean(body.approved), String(body.decided_by ?? "group_admin"));
   if (!row) return c.json({ ok: false, error: "approval not found" });
-  // 批准且动作是群通知 → 真正代发
+  // 批准且动作是群通知 → SSE 触达（P3：OpenIM 代发已删除）
   if (body.approved && detail && row.action === "notify_group") {
-    try {
-      await openimClient.sendGroupNotice(String(detail.group_id ?? ""), String(detail.text ?? ""));
-    } catch (e) {
-      return c.json({ ok: false, error: `approved but send failed: ${e}` });
-    }
+    fanout("notify_group", { group_id: detail.group_id ?? "", text: detail.text ?? "" });
   }
   return c.json({ ok: true, approval: row });
 })
@@ -52,7 +48,7 @@ export const rbacRoutes = new Hono()
   try {
     const [ok, why] = await canDo(actor, "assign_notify");
     if (ok && why.startsWith("admin")) {
-      await openimClient.sendGroupNotice(String(body.group_id ?? ""), String(body.text ?? ""));
+      fanout("notify_group", { group_id: body.group_id ?? "", text: body.text ?? "" });
       return c.json({ ok: true, direct: true });
     }
     const approvalId = await requireApproval(actor, "notify_group",
