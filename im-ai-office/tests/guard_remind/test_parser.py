@@ -71,3 +71,61 @@ def test_invalid_returns_none():
     assert parse("尽快", NOW) is None
     assert parse("", NOW) is None
     assert parse(None, NOW) is None
+
+
+# ============ 时刻点（时刻点Deadline解析Spec，2026-09-02）============
+NOW_PM = datetime(2026, 8, 28, 13, 0)
+
+
+def _t(m, d, h, mi):
+    return datetime(2026, m, d, h, mi)
+
+
+def test_time_only_future_today():
+    # 纯时刻点：今天该时刻（now 10:00 < 12:56）
+    assert parse("12点56分", NOW) == _t(8, 28, 12, 56)
+
+
+def test_time_only_passed_goes_tomorrow():
+    # 已过则明天
+    assert parse("12点56分", NOW_PM) == _t(8, 29, 12, 56)
+
+
+def test_time_half():
+    assert parse("12点半", NOW) == _t(8, 28, 12, 30)
+
+
+def test_time_colon():
+    assert parse("14:30", NOW) == _t(8, 28, 14, 30)
+
+
+def test_time_afternoon_period():
+    assert parse("下午3点", NOW) == _t(8, 28, 15, 0)
+
+
+def test_time_evening_half():
+    assert parse("晚上8点半", NOW) == _t(8, 28, 20, 30)
+
+
+def test_date_with_time_tomorrow():
+    assert parse("明天下午3点", NOW) == _t(8, 29, 15, 0)
+
+
+def test_date_with_time_weekday():
+    # 周五 = 今天（周五说周五指今天）+ 下午2点
+    assert parse("周五下午2点前", NOW) == _t(8, 28, 14, 0)
+
+
+def test_date_with_time_month_day():
+    # 31号在当月未来（8-28 → 8-31）；注意 25号已过会滚次月（既有规则）
+    assert parse("31号上午10点", NOW) == _t(8, 31, 10, 0)
+
+
+def test_tonight_normalized():
+    # 今晚 → 今天晚上，时段折算 20:00
+    assert parse("今晚8点", NOW) == _t(8, 28, 20, 0)
+
+
+def test_invalid_hour_falls_back():
+    # 25点非法 → 时刻忽略，无日期词 → None
+    assert parse("25点", NOW) is None
