@@ -8,6 +8,14 @@ if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
 Set-Location $Root
 $env:PYTHONUTF8 = "1"
 
+# 原生 PostgreSQL（业务数据，2026-09-02 迁出 Docker）：未运行则拉起（免管理员，数据目录属当前用户）
+$pgReady = & C:\imai\pgsqlin\pg_isready.exe -h 127.0.0.1 -p 5432 2>$null
+if ($pgReady -notmatch "accepting connections") {
+    Start-Process -FilePath "C:\imai\pgsqlin\pg_ctl.exe" `
+        -ArgumentList "-D","C:\imai\pgdata","-l","C:\imai\pglog.txt","start" -WindowStyle Hidden
+    Start-Sleep -Seconds 4
+}
+
 # Kill stale listeners on 8000 (and legacy 8400 gateway, idempotent re-run)
 foreach ($port in 8000, 8400) {
     Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |

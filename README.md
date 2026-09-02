@@ -75,7 +75,9 @@ AI 全程留痕，关键动作必须人审
 ```bash
 cd im-ai-office/backend-ts
 
-# 1. 基础依赖（Postgres + Redis + OpenIM）
+# 1a. 业务数据库：Windows 原生 PostgreSQL 16（数据目录 C:/imai/pgdata，独立于 Docker）
+#     安装与初始化见 im-ai-office/交接文档.md §2；或临时用 Docker PG 亦可
+# 1b. OpenIM 全家桶 + Redis（IM 底座）
 docker compose -f ../deploy/docker-compose.yml --env-file ../deploy/openim.env up -d
 
 # 2. 后端（TypeScript）

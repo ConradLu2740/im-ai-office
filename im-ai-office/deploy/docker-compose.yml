@@ -1,23 +1,7 @@
 # Windows 本机部署栈（IMAI + OpenIM v3.8.3-patch.15）
 # 用法: docker compose -f deploy/docker-compose.yml --env-file deploy/openim.env up -d
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: imai-postgres
-    environment:
-      POSTGRES_USER: imai
-      POSTGRES_PASSWORD: imai_secret
-      POSTGRES_DB: imai
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      # 2026-08-31：移除 ../domain/schema.sql initdb 挂载（domain/ 已随仓库清理删除；
-      # pgdata 卷已初始化，initdb 脚本本就只在空卷时执行）
-    restart: always
-    networks:
-      - openim
-
+  # imai-postgres 已迁出 Docker（2026-09-02）：业务数据改用 Windows 原生 PG16（C:/imai/pgdata，服务 imai-postgresql）
   mongo:
     image: "${MONGO_IMAGE}"
     container_name: mongo
@@ -377,7 +361,6 @@ services:
 
 
 volumes:
-  pgdata:
   mongo_data:
   redis_data:
   minio_data:
