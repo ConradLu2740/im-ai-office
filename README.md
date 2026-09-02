@@ -7,7 +7,7 @@
 
 ## What is IMAI?
 
-**IMAI is a conversational AI office assistant built on OpenIM + LLM.** It listens to your team chat, extracts tasks from casual messages ("Xiao Li, send the report by Friday"), asks the sender to confirm, tracks them on a kanban board, and sends due-date reminders — a human-in-the-loop ChatOps workflow bot for small teams (10–50 people). Self-hosted with your own database and your choice of LLM (DeepSeek / any OpenAI-compatible model), so your data never leaves your server.
+**IMAI is a conversational AI office assistant built on a self-hosted chat layer + LLM** (formerly OpenIM, replaced by a built-in implementation). It listens to your team chat, extracts tasks from casual messages ("Xiao Li, send the report by Friday"), asks the sender to confirm, tracks them on a kanban board, and sends due-date reminders — a human-in-the-loop ChatOps workflow bot for small teams (10–50 people). Self-hosted with your own database and your choice of LLM (DeepSeek / any OpenAI-compatible model), so your data never leaves your server.
 
 **Key capabilities:** AI task extraction from group messages · ambiguity resolution via AI DM (which "Zhang" did you mean?) · kanban with overdue alerts · tiered reminders (24h / due-day / overdue) · task completion tracking (button or natural language "done!") · team memory (terms & nicknames injected into recognition) · RBAC with full audit trail.
 
@@ -15,7 +15,7 @@
 
 ## 一、这是什么
 
-IMAI 办公助手是一个**对话式 AI 办公系统**：在开源 IM（OpenIM）之上加了一层 AI 协同能力，让 AI 以"同事"的身份待在工作群里——不是挂在旁边等人提问的问答框，而是主动参与、产出、受审的一等公民。
+IMAI 办公助手是一个**对话式 AI 办公系统**：内建聊天层（2026-09 起替代 OpenIM 底座）加一层 AI 协同能力，让 AI 以"同事"的身份待在工作群里——不是挂在旁边等人提问的问答框，而是主动参与、产出、受审的一等公民。
 
 它解决的是小团队最日常的痛点：**群里聊得好好的事情，说完就散了**。口头安排没有归属、没有截止、没人跟进，全靠人肉记忆和责任心。IMAI 让 AI 来干这个"跟单员"的活：
 
@@ -36,7 +36,7 @@ AI 全程留痕，关键动作必须人审
 - **项目型小团队**：产品/开发/运营混群沟通，任务散落在聊天记录里，需要自动沉淀成看板
 - **创业公司**：没有预算上重型 OA/项目管理系统，但"口头承诺没人跟"天天发生
 - **对数据敏感的团队**：客户沟通、业务讨论不能过第三方云，需要**本地部署、数据不出域**
-- **已经在用自建 IM 的团队**：基于 OpenIM 的消息底座可以平滑接入，不用换聊天工具
+- **不想运维 IM 基础设施的团队**：聊天能力内建（PostgreSQL 一套数据库搞定），无需额外部署 IM 全家桶
 
 一句话判断标准：如果你的群聊里每天有 5 条以上"谁在什么时候之前要干完什么"，这个工具对你有价值。
 
@@ -44,15 +44,16 @@ AI 全程留痕，关键动作必须人审
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 消息底座 | **OpenIM v3.8.3** | 开源 IM 全家桶（Docker Compose），Webhook 事件出口 |
-| 后端 | **TypeScript / Hono + Zod** | AI 识别管线、任务/看板/提醒/记忆/权限、REST 代发 + SSE 实时推送（UI 数据面与后端内聚，无独立网关进程） |
-| 数据库 | **PostgreSQL** | 任务、消息、审计、去重、团队记忆 |
+| 桌面壳 | **Electron**（2026-09-02 替代 Tauri） | 托盘未读/系统通知/开机自启/后端子进程生命周期（esbuild 依赖全内联，分发不需 node_modules） |
+| 后端 | **TypeScript / Hono + Zod** | 自建聊天层（发送内联 AI 闸门 + SSE 推送）、AI 识别管线、任务/看板/提醒/记忆/权限，全部单体内聚 |
+| 数据层 | **Drizzle ORM + PostgreSQL** | 单一数据库（业务+聊天），drizzle-kit 迁移管理 schema，消息唯一约束幂等 |
+| 认证 | **scrypt + session token** | per-user 口令（替代原 OpenIM token 体系），30 天会话 |
 | 大模型 | **OpenAI 兼容接口** | 默认 DeepSeek，Zod Schema 结构化输出 + 验证重试；本地模型只改 provider 配置即可切换 |
-| 前端 | **原生 JS（无框架）**，桌面壳 **Tauri 2** | UI 逻辑全是原生 JS；Tauri 的 Rust 层只做桌面壳（拉起后端进程 + HTTP 代理），浏览器模式完全用不到它 |
+| 前端 | **原生 TS + esbuild** | Hono RPC 类型化契约（拼错端点/方法编译期报错），UI 逻辑无框架 |
 
-架构一句话：`OpenIM → Webhook 回调 → Hono/TS 后端(8000，唯一落库+AI 入口) → AI 识别 → 看板/提醒/记忆`；前端收发全走后端 REST + SSE。
+架构一句话：`Electron → Hono/TS 后端单体（自建聊天层 + AI 管线，唯一落库+AI 入口） → 单一 PostgreSQL`；实时性走 SSE，聊天内建。零 Docker / 零 Python / 零 Rust 工具链。
 
-> 🔁 2026-09-02 起后端由 Python/FastAPI 全量重写为 TypeScript（HTTP 契约 1:1），历史版本见 tag `python-backend-final`。
+> 🔁 2026-09-02 起后端由 Python/FastAPI 全量重写为 TypeScript（HTTP 契约 1:1，tag `python-backend-final`）；同日切流自建聊天层并退役 OpenIM 与 Tauri（tag `openim-era-final`），全程见《统一技术栈架构演进Spec.md》。
 
 ## 四、目标效果
 
@@ -72,25 +73,31 @@ AI 全程留痕，关键动作必须人审
 
 ## 五、快速开始
 
+依赖：Node 22+、PostgreSQL 16（任意实例）。
+
 ```bash
-cd im-ai-office/backend-ts
+cd im-ai-office
 
-# 1a. 业务数据库：Windows 原生 PostgreSQL 16（数据目录 C:/imai/pgdata，独立于 Docker）
-#     安装与初始化见 im-ai-office/交接文档.md §2；或临时用 Docker PG 亦可
-# 1b. OpenIM 全家桶 + Redis（IM 底座）
-docker compose -f ../deploy/docker-compose.yml --env-file ../deploy/openim.env up -d
-
-# 2. 后端（TypeScript）
+# 1. 安装（npm workspaces：backend-ts / frontend-ts / electron 一次装全）
 npm install
-cp ../.env.example .env   # 填 DATABASE_URL、LLM_API_KEY 等
-npx tsx src/index.ts      # http://localhost:8000
 
-# 3. 验收
-python ../scripts/acceptance.py   # 12 项端到端检查
-npx vitest run                    # 守卫测试套件
+# 2. 配置 .env（DATABASE_URL、LLM_API_KEY 等），然后建表
+cd backend-ts && npx drizzle-kit migrate
+
+# 3. 启动
+npm run dev:backend       # 后端 http://localhost:8000
+npm run dev:frontend      # 前端改动实时打包（可选）
+# 或桌面端：npm run dev:electron
+
+# 4. 测试
+cd backend-ts
+npx vitest run            # 单元守卫 17 项（imai_test 库）
+IMAI_E2E_BASE=http://localhost:8000 npx vitest run --config vitest.e2e.config.ts   # acceptance 12 项
 ```
 
-详细部署与 OpenIM 联调见 [im-ai-office/README.md](im-ai-office/README.md)。
+登录：`/api/auth/login`（username + password），口令由管理员用 `scripts/set-password.mts` 分发。
+
+详细架构、Electron 打包与聊天层设计见 [im-ai-office/README.md](im-ai-office/README.md)。
 
 ## 六、路线图
 
@@ -100,6 +107,7 @@ npx vitest run                    # 守卫测试套件
 - ✅ M4 团队记忆（术语 / 群简介 / 修正沉淀 / 溯源）
 - ✅ 任务完成闭环（看板完成按钮 + 口头"做完了"识别）
 - ✅ 会议纪要结构化产出（行动项一键转任务）
+- ✅ 统一技术栈演进（Electron 替代 Tauri / Drizzle 数据层 / Hono RPC 契约 / 自建聊天层替代 OpenIM / Python 清零）
 - 🔶 回调对账机制（后端停机期间消息补拉）
 - ⏭ 本地大模型实测切换（provider 锚点已就绪）
 
@@ -117,4 +125,4 @@ npx vitest run                    # 守卫测试套件
 
 ---
 
-*Built with OpenIM · Hono (TypeScript) · DeepSeek · Tauri 2*
+*Built with Electron · Hono (TypeScript) · Drizzle · DeepSeek*
