@@ -9,6 +9,7 @@ import { rbacRoutes } from "./routes/rbac.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { miscRoutes } from "./routes/misc.js";
 import { extraRoutes } from "./routes/extra.js";
+import { authRoutes } from "./routes/auth.js";
 import { handleOpenimCallback } from "./callback.js";
 import { checkCallbackToken } from "./deps.js";
 
@@ -41,6 +42,7 @@ export const app = new Hono()
   .route("/", memoryRoutes)
   .route("/", miscRoutes)
   .route("/", extraRoutes)
+  .route("/", authRoutes)
   // 静态前端（web/ 目录；API 路由优先于静态）
   .use("*", serveStatic({ root: "../web", rewriteRequestPath: (p) => p }))
   .get("/", serveStatic({ path: "../web/index.html" }));
