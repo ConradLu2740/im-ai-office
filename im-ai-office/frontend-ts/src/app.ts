@@ -210,7 +210,9 @@ function setSDKStatus(text: string, ok: boolean) {
 async function initSDK(userID: string, token: string) {
   // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供（initSSE），
   // 会话列表走后端 REST（loadConversations）。此函数仅保留入口语义。
-  setSDKStatus("实时通道连接中…", false);
+  // 注意：onload 时 initSSE 已先行且本地连接毫秒级完成——此处不得覆盖已连接状态
+  //（2026-09-03 实证：覆盖后无第二次 onopen，状态永远卡"连接中"，纯显示 bug）
+  if (!esAI || esAI.readyState !== 1) setSDKStatus("实时通道连接中…", false);
   loadConversations();
   startSelfHeal();
 }
