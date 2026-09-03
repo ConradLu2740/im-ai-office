@@ -4,7 +4,8 @@
 import { hc } from "hono/client";
 import type { AppType } from "../../backend-ts/src/app";
 
-export const API_BASE = "http://127.0.0.1:8000";
+// 同源部署（后端静态直出预览）走同源，避免跨源；Tauri/file:// 与 8000 端口场景仍用绝对地址
+export const API_BASE = (location.protocol.startsWith("http") && location.port && location.port !== "8000") ? "" : "http://127.0.0.1:8000";
 
 const client = hc<AppType>(API_BASE);
 

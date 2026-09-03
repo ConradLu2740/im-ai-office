@@ -6,7 +6,8 @@ import { api, apiSetSession, getTauriInvoke, type ApiResult } from "./api.js";
 window.onerror = function (msg: string | Event, src?: string, line?: number) {
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
 };
-const API_BASE = "http://127.0.0.1:8000";
+// 同源部署（如后端静态直出预览）时走同源 API，避免跨源；Tauri/file:// 与 8000 端口场景仍用绝对地址
+const API_BASE = (location.protocol.startsWith("http") && location.port && location.port !== "8000") ? "" : "http://127.0.0.1:8000";
 const fmt = (s: unknown) => (s == null ? "—" : String(s));
 
 // 当前登录状态（镜像；API 层会话见 api.ts apiSetSession）
@@ -266,6 +267,8 @@ function handleSDKMessage(m: Parameters<typeof renderGWMessage>[0]) {
 function enterMainApp() {
   document.getElementById("loginPage").classList.add("hidden");
   document.getElementById("mainApp").classList.remove("hidden");
+  applyTheme();
+  go(localStorage.getItem("imai_landing") || "chat");
   loadConversations();
   loadTasks();
   updateAIUnread();
@@ -607,17 +610,38 @@ async function loadTasks() {
   }
 }
 
-// ============ M3/M4 前端面板 ============
+// ============ M3/M4 前端面板（UI 骨架 v2：面板映射到视图容器） ============
+const _PANEL_VIEW: Record<string, string> = { board: "task", approval: "approval", rbac: "rbac", memory: "memory", summary: "summary", minutes: "summary" };
 function showPanel(name: string) {
-  document.getElementById("panel-board").style.display = name === "board" ? "" : "none";
-  document.getElementById("panel-approval").style.display = name === "approval" ? "" : "none";
-  document.getElementById("panel-rbac").style.display = name === "rbac" ? "" : "none";
-  document.getElementById("panel-memory").style.display = name === "memory" ? "" : "none";
-  document.getElementById("panel-summary").style.display = name === "summary" ? "" : "none";
-  document.querySelectorAll(".board-tabs .tab").forEach(t => {
-    const tab = t as HTMLElement;
-    tab.classList.toggle("active", tab.dataset.panel === name);
+  go(_PANEL_VIEW[name] || "chat");
+}
+
+// ============ UI 骨架 v2：视图切换 / 主题（胶水层，不改业务逻辑） ============
+const VIEW_TITLES: Record<string, string> = {
+  chat: "聊天", task: "任务工作台", approval: "审批",
+  memory: "AI 的记忆", summary: "汇总与纪要", rbac: "权限", settings: "设置",
+};
+function go(view: string) {
+  const target = document.getElementById("view-" + view);
+  if (!target) return;
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("on"));
+  target.classList.add("on");
+  document.querySelectorAll(".nitem").forEach(n => {
+    const el = n as HTMLElement;
+    el.classList.toggle("on", el.dataset.view === view);
   });
+  const t = document.getElementById("viewTitle");
+  if (t) t.textContent = VIEW_TITLES[view] || view;
+}
+
+function applyTheme(mode?: string) {
+  const m = mode || localStorage.getItem("imai_theme") || "light";
+  document.documentElement.setAttribute("data-theme", m === "dark" ? "dark" : "light");
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  localStorage.setItem("imai_theme", cur);
+  applyTheme(cur);
 }
 
 async function loadSummary() {
@@ -1151,6 +1175,10 @@ function _dispatchAction(el: HTMLElement) {
   switch (d.action) {
     case "doLogin": doLogin(); break;
     case "logout": logout(); break;
+    case "nav": go(d.view || "chat"); break;
+    case "toggleTheme": toggleTheme(); break;
+    case "setLanding": localStorage.setItem("imai_landing", (el as HTMLInputElement).value || "chat"); showToast("默认落地页已设为 " + (el as HTMLInputElement).value, true); break;
+    case "setThemeMode": { const mv = (el as HTMLInputElement).value || "light"; localStorage.setItem("imai_theme", mv); applyTheme(mv); break; }
     case "loadGatewayConversations": loadConversations(); break; // 兼容旧调试入口
     case "loadTasks": loadTasks(); break;
     case "toggleSim": toggleSim(); break;
@@ -1215,6 +1243,6 @@ if (_quickUser) _quickUser.addEventListener("change", swapUser);
 // ============ 调试句柄（打包后内部函数不再挂 window，供控制台排查/自动化测试使用） ============
 (window as unknown as Record<string, unknown>).IMAI = {
   api, loadConversations, loadTasks, loadSummary, loadRbac, loadMinutes, loadAudit,
-  showPanel, renderConversations, sendMsg,
+  showPanel, renderConversations, sendMsg, go,
   getUser: () => currentUser, getToken: () => currentToken,
 };
