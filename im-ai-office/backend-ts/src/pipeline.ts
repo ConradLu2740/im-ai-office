@@ -64,11 +64,16 @@ export async function resolve(msg: string, sender = "李娜(娜姐)", intent?: P
   if (mode === "self") {
     return { assignee: sender, confidence: "high", candidates: [], mode, ambiguous: false };
   }
-  const names = await distinctAliasNames();
+  const names = (await distinctAliasNames()).filter((n): n is string => !!n).sort((a, b) => b.length - a.length);
+  // 最长匹配优先（2026-09-03 实证）：消息含“小张为”时，短别名“小张”是它的子串，
+  // 若不跳过会把 1 人歧义扩大成 3 人。短别名被更长命中覆盖时不再收集
+  const matchedNames: string[] = [];
   const hits: PersonRow[] = [];
   const seen = new Set<number>();
   for (const n of names) {
-    if (n && msg.includes(n)) {
+    if (matchedNames.some((m) => m.includes(n))) continue;
+    if (msg.includes(n)) {
+      matchedNames.push(n);
       for (const p of await findPersonsByAlias(n)) {
         if (!seen.has(p.id)) { seen.add(p.id); hits.push(p); }
       }
