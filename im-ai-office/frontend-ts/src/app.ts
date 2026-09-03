@@ -1,21 +1,22 @@
-// TODO(渐进迁移): @ts-nocheck 为移植期临时措施——本文件由 app.js 1:1 移植，
-// 类型欠账 ~76 处（DOM 元素窄化/unknown 收敛），逐步移除本标记收紧。
+// 类型已全量收紧（2026-09-03）：移除 @ts-nocheck，DOM 窄化/unknown 收敛完成。
 // API 层已摘出至 api.ts（无 @ts-nocheck，Hono RPC 契约全检）。
-// @ts-nocheck
+
 import { api, apiSetSession, getTauriInvoke, type ApiResult } from "./api.js";
-window.onerror = function(msg, src, line){
+
+window.onerror = function (msg: string | Event, src?: string, line?: number) {
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
 };
 const API_BASE = "http://127.0.0.1:8000";
-const fmt = (s) => (s == null ? "—" : s);
+const fmt = (s: unknown) => (s == null ? "—" : String(s));
 
 // 当前登录状态（镜像；API 层会话见 api.ts apiSetSession）
-let currentUser = null;
-let currentToken = null;
-let currentConversation = null;
+type ConvState = { id: string; targetId?: string; name?: string; type: number | string };
+let currentUser: string | null = null;
+let currentToken: string | null = null;
+let currentConversation: ConvState | null = null;
 
 
-function showToast(msg, ok = true) {
+function showToast(msg: string, ok = true) {
   let box = document.getElementById("toastBox");
   if (!box) {
     box = document.createElement("div");
@@ -31,10 +32,10 @@ function showToast(msg, ok = true) {
   setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 260); }, 2200);
 }
 
-function fmtTime(ts) {
+function fmtTime(ts: string | number | null | undefined) {
   if (!ts) return "";
   const d = new Date(ts);
-  if (isNaN(d)) return String(ts).replace("T", " ").slice(5, 16);
+  if (isNaN(d.getTime())) return String(ts).replace("T", " ").slice(5, 16);
   const now = new Date();
   const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   const yest = new Date(now); yest.setDate(now.getDate() - 1);
@@ -43,39 +44,41 @@ function fmtTime(ts) {
   return String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + " " + hm;
 }
 
-function logDebug(info) {
+function logDebug(info: unknown) {
   const card = document.createElement("div");
   card.className = "ai-card";
   card.innerHTML = "<b>🐞 诊断信息</b><pre style='font-size:11px;color:#5a6482;'>" + JSON.stringify(info, null, 2) + "</pre>";
   document.getElementById("messages").appendChild(card);
 }
 
-function setBackendStatus(ok, text) {
+function setBackendStatus(ok: boolean, text: string) {
   document.getElementById("statusDot").className = "dot" + (ok ? " ok" : "");
   document.getElementById("statusText").textContent = text;
 }
 
 async function startBackend() {
-  if (!getTauriInvoke()) return showToast("当前不是桌面应用环境", false);
+  const inv = getTauriInvoke();
+  if (!inv) return showToast("当前不是桌面应用环境", false);
   setBackendStatus(false, "正在启动后端...");
   document.getElementById("startBtn").style.display = "none";
   try {
-    const status = await getTauriInvoke()("start_backend");
+    const status = await inv("start_backend", {}) as { running: boolean; message: string };
     setBackendStatus(status.running, status.message);
   } catch (e) {
     setBackendStatus(false, "启动失败");
-    logDebug({ action: "start_backend", error: e.message || String(e) });
+    logDebug({ action: "start_backend", error: (e as Error).message || String(e) });
     document.getElementById("startBtn").style.display = "inline-block";
   }
 }
 
 async function runDiagnose() {
-  if (!getTauriInvoke()) return;
+  const inv = getTauriInvoke();
+  if (!inv) return;
   try {
-    const info = await getTauriInvoke()("diagnose");
+    const info = await inv("diagnose", {}) as Record<string, unknown>;
     logDebug({ action: "diagnose", ...info });
   } catch (e) {
-    logDebug({ action: "diagnose", error: e.message || String(e) });
+    logDebug({ action: "diagnose", error: (e as Error).message || String(e) });
   }
 }
 
@@ -91,8 +94,8 @@ async function checkBackend() {
 
 // ============ 登录 ============
 function swapUser() {
-  const sel = document.getElementById("quickUser");
-  const input = document.getElementById("loginUser");
+  const sel = document.getElementById("quickUser") as HTMLSelectElement;
+  const input = document.getElementById("loginUser") as HTMLInputElement;
   const v = sel.value;
   if (v === "__custom__") {
     sel.selectedIndex = 0; // 回到默认选项
@@ -104,13 +107,13 @@ function swapUser() {
 }
 
 async function doLogin() {
-  const user = document.getElementById("loginUser").value.trim();
+  const user = (document.getElementById("loginUser") as HTMLInputElement).value.trim();
   if (!user) return showToast("请输入用户名", false);
-  const password = (document.getElementById("loginPwd") || {}).value || "";
+  const password = (document.getElementById("loginPwd") as HTMLInputElement | null)?.value || "";
   try {
     // P3 自建认证：username/password → session token（res.user_id 复用 OpenIM userID）
-    const res = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: user, password }) });
-    if (res.ok) {
+    const res = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: user, password }) }) as { ok?: boolean; user_id?: string; token?: string; error?: string };
+    if (res.ok && res.user_id && res.token) {
       currentUser = res.user_id;
       currentToken = res.token;
       apiSetSession(res.user_id, res.token);
@@ -122,7 +125,7 @@ async function doLogin() {
       showToast("登录失败：" + (res.error || ""), false);
     }
   } catch (e) {
-    showToast("登录异常：" + e.message, false);
+    showToast("登录异常：" + (e as Error).message, false);
   }
 }
 
@@ -150,28 +153,33 @@ export interface MessageRow {
   content_type: number; is_self: number; msg_seq: number | null; client_msg_id: string | null; ts: string;
 }
 export interface AiDmRow { id: number; sender_id: string; direction: "in" | "out"; content: string; task_id: number | null; read_flag: number; ts: string; }
+export interface AiCardResult {
+  action?: string;
+  intent?: Record<string, unknown>;
+  task?: { content?: string; assignee?: string; deadline?: string; candidates?: Array<{ label: string }> } | null;
+  assign?: { ambiguous_labels?: Array<{ label: string }> } | null;
+}
 export interface ApprovalRow { id: number; actor: string; action: string; detail: string | Record<string, unknown> | null; status: string; created_at: string; decided_at: string | null; decided_by: string | null; }
 export interface ConversationItem {
   conversationID: string; conversationType: number; userID?: string; groupID?: string;
   showName?: string | null; latestMsg?: string | null; unreadCount?: number;
 }
 declare global {
-  interface Window { __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }
 }
 
 // ============ OpenIM SDK 实时消息 ============
-let sdk = null;
+let sdk: unknown = null;
 let connected = false;
-let pollTimer = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-function setSDKStatus(text, ok) {
+function setSDKStatus(text: string, ok: boolean) {
   const el = document.getElementById("sdkStatus");
   if (!el) return;
   el.textContent = text;
   el.style.color = ok ? "#1a9e6c" : "#d64550";
 }
 
-async function initSDK(userID, token) {
+async function initSDK(userID: string, token: string) {
   // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供（initSSE），
   // 会话列表走后端 REST（loadConversations）。此函数仅保留入口语义。
   setSDKStatus("IM 连接中...", false);
@@ -193,7 +201,7 @@ const _groupNameCache = new Map();
 
 // P3：群名随 /api/conversations 直接返回，旧 resolveGroupNames 已删
 
-function renderConversations(list, unreadMap) {
+function renderConversations(list: Array<{ conv_id: string; group_id?: string | number | null; name?: string | null; last_message?: string | null }> | null | undefined, unreadMap: Record<string, number>) {
   const box = document.getElementById("sessionList");
   // P3 新契约：list = [{conv_id, group_id, name, last_message, last_sender, last_ts, last_msg_id}]
   let html = `<div class="session" id="aiSession" data-action="selectAISession">
@@ -251,7 +259,7 @@ function renderGWMessage(m: { clientMsgID?: string; sendID?: string; senderNickn
 
 // 网关收敛后无 SDK 版会话渲染（原 renderConversationsFromSDK 已删，网关收敛Spec §3-1）
 
-function handleSDKMessage(m) {
+function handleSDKMessage(m: Parameters<typeof renderGWMessage>[0]) {
   renderGWMessage(m);
 }
 
@@ -267,16 +275,16 @@ function enterMainApp() {
 async function loadConversations() {
   // P3 自建聊天层：会话列表来自 user_group + message 聚合（不再依赖 OpenIM REST）
   try {
-    const res = await api("/api/conversations");
+    const res = await api("/api/conversations") as ApiResult & { conversations?: Array<{ conv_id: string; group_id?: string | number | null; name?: string | null; last_message?: string | null }> };
     if (!res.ok) { showToast("获取会话失败：" + (res.error || ""), false); return; }
-    const unreadMap = {};
+    const unreadMap: Record<string, number> = {};
     try {
-      const u = await api("/api/messages/unread");
+      const u = await api("/api/messages/unread") as { unread?: Array<{ conv_id: string; unread: number }> };
       (u.unread || []).forEach(x => { unreadMap[x.conv_id] = x.unread; });
     } catch (_) {}
     renderConversations(res.conversations || [], unreadMap);
   } catch (e) {
-    showToast("获取会话异常：" + e.message, false);
+    showToast("获取会话异常：" + (e as Error).message, false);
   }
 }
 
@@ -295,7 +303,7 @@ async function selectAISession() {
 
 async function loadAIMessages() {
   try {
-    const res = await api("/api/ai_dm", { method: "GET", headers: { "Content-Type": "application/json" }, body: null });
+    const res = await api("/api/ai_dm", { method: "GET", headers: { "Content-Type": "application/json" }, body: null }) as { ok?: boolean; messages?: AiDmRow[] };
     if (!res.ok && !res.messages) return; // 有 messages 即使缺 ok 也渲染（双保险）
     const box = document.getElementById("messages");
     box.innerHTML = "";
@@ -317,11 +325,11 @@ async function loadAIMessages() {
 
 async function updateAIUnread() {
   try {
-    const res = await api("/api/ai_dm");
+    const res = await api("/api/ai_dm") as { unread?: number };
     const el = document.getElementById("aiUnread");
     const cnt = res.unread || 0;
     el.style.display = cnt ? "inline-block" : "none";
-    el.textContent = cnt;
+    el.textContent = String(cnt);
   } catch (e) {}
 }
 
@@ -331,13 +339,14 @@ function selectConversation(convId: string, targetId: string, name: string, conv
   document.getElementById("chatSub").textContent = convType === 3 ? "群聊 · AI 旁听中" : "单聊";
   document.getElementById("messages").innerHTML = "";
   document.querySelectorAll(".session").forEach(s => s.classList.remove("active"));
-  (el || event?.currentTarget)?.classList?.add("active");
+  const active = el || (event?.currentTarget as HTMLElement | null);
+  active?.classList.add("active");
   loadMessageHistory(convId);
 }
 
 async function loadMessageHistory(convId: string) {
   try {
-    const res = await api(`/api/messages?conv_id=${encodeURIComponent(convId)}`);
+    const res = await api(`/api/messages?conv_id=${encodeURIComponent(convId)}`) as { messages?: MessageRow[] };
     if (!res.messages || !res.messages.length) return;
     const box = document.getElementById("messages");
     box.innerHTML = "";
@@ -371,12 +380,12 @@ function toggleSim() {
 }
 
 async function sendSim() {
-  const sender = document.getElementById("simSender").value.trim() || "同事";
-  const text = document.getElementById("simText").value.trim();
+  const sender = (document.getElementById("simSender") as HTMLInputElement).value.trim() || "同事";
+  const text = (document.getElementById("simText") as HTMLTextAreaElement).value.trim();
   if (!text) return showToast("请输入消息内容", false);
   const convId = "sg_simulated";
   try {
-    const res = await api("/api/simulate_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender, text, conv_id: convId }) });
+    const res = await api("/api/simulate_message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender, text, conv_id: convId }) }) as { ok?: boolean; error?: string; ai?: AiCardResult };
     if (res.ok) {
       // 显示到聊天区（别人发的，左侧）
       const box = document.getElementById("messages");
@@ -391,17 +400,17 @@ async function sendSim() {
       if (res.ai) renderAICard(res.ai);
       // 刷新看板
       loadTasks();
-      document.getElementById("simText").value = "";
+      (document.getElementById("simText") as HTMLTextAreaElement).value = "";
     } else {
       showToast("模拟失败：" + (res.error || ""), false);
     }
   } catch (e) {
-    showToast("模拟异常：" + e.message, false);
+    showToast("模拟异常：" + (e as Error).message, false);
   }
 }
 
 async function sendMsg() {
-  const input = document.getElementById("msg");
+  const input = document.getElementById("msg") as HTMLTextAreaElement;
   const text = input.value.trim();
   if (!text) return;
   if (!currentConversation) return showToast("请先选择一个会话", false);
@@ -423,7 +432,7 @@ async function sendMsg() {
   // AI 助手会话：回复数字确认
   if (currentConversation.type === "ai") {
     try {
-      const res = await api("/api/tasks/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender_id: currentUser, choice: text }) });
+      const res = await api("/api/tasks/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender_id: currentUser, choice: text }) }) as { ok?: boolean; error?: string; reason?: string };
       if (!res.ok) {
         showToast("确认失败：" + (res.error || res.reason || "无待确认任务"), false);
       } else {
@@ -431,7 +440,7 @@ async function sendMsg() {
         loadTasks();
       }
     } catch (e) {
-      showToast("确认异常：" + e.message, false);
+      showToast("确认异常：" + (e as Error).message, false);
     }
     return;
   }
@@ -444,7 +453,7 @@ async function sendMsg() {
     }
     const payload = { conv_id: "sg_" + currentConversation.targetId, text, client_msg_id: cmid };
     // cmid 已在本地回显前生成并登记；SSE 回声携带同 cmid/db_id，_seenMsgIDs 拦截
-    const res = await api("/api/messages/send", { method: "POST", body: JSON.stringify(payload) });
+    const res = await api("/api/messages/send", { method: "POST", body: JSON.stringify(payload) }) as { ok?: boolean; error?: string; dedup?: boolean; id?: number };
     if (!res.ok) {
       if (res.dedup) { /* 幂等命中，本地已有回显 */ } else {
         showToast("发送失败：" + (res.error || ""), false);
@@ -457,25 +466,25 @@ async function sendMsg() {
     setTimeout(loadTasks, 1500);
     updateAIUnread();
   } catch (e) {
-    showToast("发送异常：" + e.message, false);
+    showToast("发送异常：" + (e as Error).message, false);
   }
 }
 
 // ============ 看板 ============
-let editingTaskId = null; // 迭代2 B1：正在内联编辑的任务 id
+let editingTaskId: number | null = null; // 迭代2 B1：正在内联编辑的任务 id
 
-function parseDeadlineAt(v) {
+function parseDeadlineAt(v: string | null | undefined) {
   if (!v) return null;
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
 }
-function fmtDeadlineDate(d) {
-  const p = n => String(n).padStart(2, "0");
+function fmtDeadlineDate(d: Date) {
+  const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function renderTaskCard(t: TaskRow) {
-  const confCls = { high: "tag-high", medium: "tag-mid", low: "tag-low" };
+  const confCls: Record<string, string> = { high: "tag-high", medium: "tag-mid", low: "tag-low" };
   const isPending = t.status === "pending_confirmation";
   const isConfirmed = t.status === "confirmed";
   const isDone = t.status === "done";   // G1：完成终态
@@ -522,20 +531,20 @@ function renderTaskCard(t: TaskRow) {
   `;
 }
 
-async function confirmTask(id) {
+async function confirmTask(id: number) {
   await api(`/api/tasks/${id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   loadTasks();
 }
 
-async function rejectTask(id) {
+async function rejectTask(id: number) {
   await api(`/api/tasks/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "负责人错了" }) });
   loadTasks();
 }
 
-async function saveTaskEdit(id) {
-  const assignee = (document.getElementById("editAssignee").value || "").trim();
-  const dl = document.getElementById("editDeadline").value || ""; // "YYYY-MM-DDTHH:MM"
-  const body = {};
+async function saveTaskEdit(id: number) {
+  const assignee = ((document.getElementById("editAssignee") as HTMLInputElement).value || "").trim();
+  const dl = (document.getElementById("editDeadline") as HTMLInputElement).value || ""; // "YYYY-MM-DDTHH:MM"
+  const body: Record<string, string> = {};
   if (assignee) body.assignee = assignee;
   if (dl) body.deadline = dl.replace("T", " ");
   try {
@@ -544,11 +553,11 @@ async function saveTaskEdit(id) {
     loadTasks();
     showToast("任务已更新" + (body.deadline ? "，提醒已按新时间重算" : ""), true);
   } catch (e) {
-    showToast("更新失败：" + e.message, false);
+    showToast("更新失败：" + (e as Error).message, false);
   }
 }
 
-async function cancelTask(id, btn) {
+async function cancelTask(id: number, btn: HTMLElement) {
   // 两步确认：第一次点变「确认取消?」，3 秒内再点才生效（不用阻塞式弹窗）
   if (btn.dataset.armed !== "1") {
     btn.dataset.armed = "1";
@@ -561,23 +570,24 @@ async function cancelTask(id, btn) {
     loadTasks();
     showToast("任务已取消", true);
   } catch (e) {
-    showToast("取消失败：" + e.message, false);
+    showToast("取消失败：" + (e as Error).message, false);
   }
 }
 
 async function loadTasks() {
   try {
-    const data = await api("/api/tasks");
-    const pendingAssignee = data.tasks.filter(t => t.status === "pending_assignee");
-    const pending = data.tasks.filter(t => t.status === "pending_confirmation");
-    const confirmed = data.tasks.filter(t => t.status === "confirmed");
-    const done = data.tasks.filter(t => t.status === "done");   // G1：已完成仍展示（✅ 徽标），排最后
+    const data = await api("/api/tasks") as { tasks?: TaskRow[] };
+    const tasks = data.tasks || [];
+    const pendingAssignee = tasks.filter(t => t.status === "pending_assignee");
+    const pending = tasks.filter(t => t.status === "pending_confirmation");
+    const confirmed = tasks.filter(t => t.status === "confirmed");
+    const done = tasks.filter(t => t.status === "done");   // G1：已完成仍展示（✅ 徽标），排最后
     // 老化排序：越临近/越已过期的待决任务排越前，避免旧任务沉底被遗忘
-    const byDeadline = (a, b) => (parseDeadlineAt(a.deadline_at)?.getTime() ?? Infinity) - (parseDeadlineAt(b.deadline_at)?.getTime() ?? Infinity);
+    const byDeadline = (a: TaskRow, b: TaskRow) => (parseDeadlineAt(a.deadline_at)?.getTime() ?? Infinity) - (parseDeadlineAt(b.deadline_at)?.getTime() ?? Infinity);
     pendingAssignee.sort(byDeadline); pending.sort(byDeadline);
-    document.getElementById("countPendingAssignee").textContent = pendingAssignee.length;
-    document.getElementById("countPending").textContent = pending.length;
-    document.getElementById("countConfirmed").textContent = confirmed.length;
+    document.getElementById("countPendingAssignee").textContent = String(pendingAssignee.length);
+    document.getElementById("countPending").textContent = String(pending.length);
+    document.getElementById("countConfirmed").textContent = String(confirmed.length);
     document.getElementById("listPendingAssignee").innerHTML = pendingAssignee.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待指派任务</div>";
     document.getElementById("listPending").innerHTML = pending.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待确认任务</div>";
     document.getElementById("listConfirmed").innerHTML = confirmed.map(renderTaskCard).join("") + done.map(renderTaskCard).join("") || (confirmed.length + done.length ? "" : "<div style='color:#8f959e;font-size:12px;'>暂无已确认任务</div>");
@@ -588,37 +598,38 @@ async function loadTasks() {
 }
 
 // ============ M3/M4 前端面板 ============
-function showPanel(name) {
+function showPanel(name: string) {
   document.getElementById("panel-board").style.display = name === "board" ? "" : "none";
   document.getElementById("panel-approval").style.display = name === "approval" ? "" : "none";
   document.getElementById("panel-rbac").style.display = name === "rbac" ? "" : "none";
   document.getElementById("panel-memory").style.display = name === "memory" ? "" : "none";
   document.getElementById("panel-summary").style.display = name === "summary" ? "" : "none";
   document.querySelectorAll(".board-tabs .tab").forEach(t => {
-    t.classList.toggle("active", t.dataset.panel === name);
+    const tab = t as HTMLElement;
+    tab.classList.toggle("active", tab.dataset.panel === name);
   });
 }
 
 async function loadSummary() {
   const box = document.getElementById("summaryBox");
   try {
-    const data = await api("/api/summary/daily");
+    const data = await api("/api/summary/daily") as { text?: string };
     // 先转义再换行，避免 <br> 被转义成字面文本（双重转义 bug）
     const text = esc(data.text || "").replace(/\n/g, "<br>");
     box.innerHTML = `<div class="summary-text">${text}</div>`;
   } catch (e) {
-    box.innerHTML = `<div class='approval-empty'>生成失败：${esc(e.message)}</div>`;
+    box.innerHTML = `<div class='approval-empty'>生成失败：${esc((e as Error).message)}</div>`;
   }
 }
 
 let _approvalStatus = "pending";
 
-async function loadApprovals(status) {
+async function loadApprovals(status?: string) {
   if (status) _approvalStatus = status;
   const st = _approvalStatus;
   const box = document.getElementById("approvalList");
   try {
-    const data = await api(`/api/approvals?status=${encodeURIComponent(st)}`);
+    const data = await api(`/api/approvals?status=${encodeURIComponent(st)}`) as { approvals?: ApprovalRow[] };
     const list = data.approvals || [];
     if (!list.length) {
       const emptyText = { pending: "暂无待审批的高风险动作 ✅", approved: "暂无已批准记录", rejected: "暂无已拒绝记录" }[st] || "暂无记录";
@@ -627,7 +638,7 @@ async function loadApprovals(status) {
     }
     box.innerHTML = list.map(a => {
       let detail = "";
-      try { detail = JSON.stringify(JSON.parse(a.detail), null, 2); } catch(e) { detail = a.detail; }
+      try { detail = JSON.stringify(JSON.parse(String(a.detail)), null, 2); } catch(e) { detail = String(a.detail ?? ""); }
       const decided = a.status !== "pending" ? `<div style="font-size:11px;color:#8f959e;margin-bottom:6px;">${esc(a.decided_by || "")} · ${esc(a.decided_at || "")}</div>` : "";
       const btns = a.status === "pending" ? `
         <div class="a-btns">
@@ -642,32 +653,32 @@ async function loadApprovals(status) {
       </div>`;
     }).join("");
   } catch (e) {
-    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc((e as Error).message)}</div>`;
   }
 }
 
-async function approveApproval(id) {
+async function approveApproval(id: number) {
   try {
-    const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: true }) });
-    showToast(r.ok ? "已批准" : "批准失败：" + (r.error || ""), r.ok);
+    const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: true }) }) as { ok?: boolean; error?: string };
+    showToast(r.ok ? "已批准" : "批准失败：" + (r.error || ""), !!r.ok);
     loadApprovals(); loadTasks();
-  } catch (e) { showToast("批准异常：" + e.message, false); }
+  } catch (e) { showToast("批准异常：" + (e as Error).message, false); }
 }
 
-async function rejectApproval(id) {
+async function rejectApproval(id: number) {
   try {
-    const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: false }) });
-    showToast(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""), r.ok);
+    const r = await api(`/api/approvals/${id}/decide`, { method: "POST", body: JSON.stringify({ approved: false }) }) as { ok?: boolean; error?: string };
+    showToast(r.ok ? "已拒绝" : "拒绝失败：" + (r.error || ""), !!r.ok);
     loadApprovals();
-  } catch (e) { showToast("拒绝异常：" + e.message, false); }
+  } catch (e) { showToast("拒绝异常：" + (e as Error).message, false); }
 }
 
-async function completeTask(id) {
+async function completeTask(id: number) {
   try {
-    const r = await api(`/api/tasks/${id}/complete`, { method: "POST", body: JSON.stringify({ actor: currentUser }) });
-    showToast(r.ok ? "任务已完成 ✅" : "操作失败", r.ok);
+    const r = await api(`/api/tasks/${id}/complete`, { method: "POST", body: JSON.stringify({ actor: currentUser }) }) as { ok?: boolean };
+    showToast(r.ok ? "任务已完成 ✅" : "操作失败", !!r.ok);
     loadTasks();
-  } catch (e) { showToast("完成异常：" + e.message, false); }
+  } catch (e) { showToast("完成异常：" + (e as Error).message, false); }
 }
 
 // ============ M3 权限可视化（M3权限前端可视化Spec）============
@@ -676,7 +687,7 @@ async function loadRbac() { await loadRoles(); await loadAudit(); }
 async function loadRoles() {
   const box = document.getElementById("roleList");
   try {
-    const data = await api("/api/roles");
+    const data = await api("/api/roles") as { roles?: Array<{ oim_user_id: string; role: string; updated_at?: string | null }> };
     const list = data.roles || [];
     let html = `<div class="approval-item"><div class="a-head"><span class="a-action">imAdmin</span><span style="font-size:11px;color:#8f959e;">group_admin（固定）</span></div></div>`;
     if (!list.length) {
@@ -691,34 +702,35 @@ async function loadRoles() {
     }
     box.innerHTML = html;
   } catch (e) {
-    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc((e as Error).message)}</div>`;
   }
 }
 
 async function setRole() {
-  const uid = document.getElementById("roleUserId").value.trim();
-  const role = document.getElementById("roleValue").value;
+  const uid = (document.getElementById("roleUserId") as HTMLInputElement).value.trim();
+  const role = (document.getElementById("roleValue") as HTMLSelectElement).value;
   if (!uid) { showToast("请输入 OpenIM 用户ID", false); return; }
   try {
-    const r = await api("/api/role/set", { method: "POST", body: JSON.stringify({ oim_user_id: uid, role }) });
-    showToast(r.ok ? `已设置 ${uid} = ${r.role}` : "设置失败：" + (r.error || ""), r.ok);
-    if (r.ok) { document.getElementById("roleUserId").value = ""; loadRoles(); }
-  } catch (e) { showToast("设置异常：" + e.message, false); }
+    const r = await api("/api/role/set", { method: "POST", body: JSON.stringify({ oim_user_id: uid, role }) }) as { ok?: boolean; error?: string; role?: string };
+    showToast(r.ok ? `已设置 ${uid} = ${r.role}` : "设置失败：" + (r.error || ""), !!r.ok);
+    if (r.ok) { (document.getElementById("roleUserId") as HTMLInputElement).value = ""; loadRoles(); }
+  } catch (e) { showToast("设置异常：" + (e as Error).message, false); }
 }
 
-function _fmtAuditTime(ts) {
+function _fmtAuditTime(ts: unknown) {
   // ISO（2026-09-02T08:48:18.154161+08:00）→ 2026-09-02 08:48
   return ts ? String(ts).slice(0, 16).replace("T", " ") : "";
 }
 
-function _fmtAuditDetail(d) {
+function _fmtAuditDetail(d: unknown) {
   // 人性化 detail：优先取 text 字段（汇总/通知类），其余紧凑 key=value，避免原始 JSON 倾倒
-  let obj = d;
+  let obj: unknown = d;
   if (typeof obj === "string") { try { obj = JSON.parse(obj); } catch (e) { return String(obj).slice(0, 140); } }
   if (obj && typeof obj === "object") {
-    if (obj.text) return String(obj.text).replace(/\n+/g, " ／ ");
-    return Object.entries(obj)
-      .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+    const rec = obj as Record<string, unknown>;
+    if (rec.text) return String(rec.text).replace(/\n+/g, " ／ ");
+    return Object.entries(rec)
+      .map(([k, v]) => `${k}=${typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}`)
       .join(" · ").slice(0, 140);
   }
   return String(d).slice(0, 140);
@@ -727,7 +739,7 @@ function _fmtAuditDetail(d) {
 async function loadAudit() {
   const box = document.getElementById("auditList");
   try {
-    const data = await api("/api/audit?limit=30");
+    const data = await api("/api/audit?limit=30") as { audit?: Array<{ action: string; actor?: string | null; ts?: string | null; created_at?: string | null; detail?: unknown }> };
     const list = data.audit || [];
     if (!list.length) {
       box.innerHTML = "<div class='approval-empty'>暂无审计记录</div>";
@@ -739,16 +751,16 @@ async function loadAudit() {
         <div class="a-detail" style="margin-bottom:0;">${esc(_fmtAuditDetail(a.detail))}</div>
       </div>`).join("");
   } catch (e) {
-    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc((e as Error).message)}</div>`;
   }
 }
 
 async function loadMemory() {
   const box = document.getElementById("memoryHtml");
   try {
-    const data = await api("/api/memory");
-    const terms = data.memory.terms || [];
-    const gm = data.memory.grp_meta;
+    const data = await api("/api/memory") as { memory?: { terms?: Array<{ term: string; meaning: string | null; source?: string | null }>; grp_meta?: { intro?: string } | null } };
+    const terms = data.memory?.terms || [];
+    const gm = data.memory?.grp_meta;
     let html = "";
     // 迭代2 B3：手动新增术语入口
     html += `<div class="memory-block"><div class="memory-block-title">新增术语</div>
@@ -791,13 +803,13 @@ async function mineRefresh() {
   // 会话下拉：与纪要页同源缓存（P3 自建契约），空则拉一次
   if (!_minutesConvs.length) {
     try {
-      const res = await api("/api/conversations");
+      const res = await api("/api/conversations") as ApiResult & { conversations?: Array<{ conv_id: string; group_id?: string | number | null; name?: string | null }> };
       if (res.ok) {
         _minutesConvs = (res.conversations || []).map(c => ({ id: c.conv_id, name: c.name || `群 ${c.group_id}` }));
       }
     } catch (_) {}
   }
-  const sel = document.getElementById("mineConv");
+  const sel = document.getElementById("mineConv") as HTMLSelectElement | null;
   if (sel && _minutesConvs.length) {
     const cur = sel.value;
     sel.innerHTML = _minutesConvs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)}</option>`).join("");
@@ -806,7 +818,7 @@ async function mineRefresh() {
   loadMineCandidates();
 }
 
-function _mineSummary(c) {
+function _mineSummary(c: { kind: string; payload?: Record<string, string | undefined> }) {
   const p = c.payload || {};
   if (c.kind === "term") return `术语 <b>${esc(p.term)}</b> = ${esc(p.meaning)}`;
   if (c.kind === "alias") return `称呼 <b>${esc(p.real_name)}</b> ← ${esc(p.alias)}`;
@@ -814,13 +826,13 @@ function _mineSummary(c) {
   return esc(c.kind);
 }
 
-const _MINE_KIND_LABEL = { term: "术语", alias: "称呼", task: "任务" };
+const _MINE_KIND_LABEL: Record<string, string> = { term: "术语", alias: "称呼", task: "任务" };
 
 async function loadMineCandidates() {
   const box = document.getElementById("mineCands");
   if (!box) return;
   try {
-    const data = await api("/api/mine/candidates");
+    const data = await api("/api/mine/candidates") as { candidates?: Array<{ id: number | string; kind: string; evidence?: string | null; payload?: Record<string, string | undefined> }> };
     const list = data.candidates || [];
     if (!list.length) {
       box.innerHTML = `<div style="color:#8f959e;font-size:12px;padding:8px;">暂无待确认候选。选会话后点「跑挖掘」</div>`;
@@ -834,26 +846,26 @@ async function loadMineCandidates() {
         <button class="danger" data-action="decideMine" data-cid="${c.id}" data-do="reject">拒绝</button>
       </div>`).join("");
   } catch (e) {
-    box.innerHTML = `<div style="color:#8f959e;font-size:12px;padding:8px;">加载失败：${esc(e.message)}</div>`;
+    box.innerHTML = `<div style="color:#8f959e;font-size:12px;padding:8px;">加载失败：${esc((e as Error).message)}</div>`;
   }
 }
 
 async function runMining() {
-  const convId = document.getElementById("mineConv").value;
-  const limit = Number(document.getElementById("mineLimit").value) || 500;
+  const convId = (document.getElementById("mineConv") as HTMLSelectElement).value;
+  const limit = Number((document.getElementById("mineLimit") as HTMLInputElement).value) || 500;
   if (!convId) { showToast("请先选择会话", false); return; }
   showToast("挖掘中…（LLM 分批处理，可能需要十几秒）", true);
   try {
-    const r = await api("/api/mine/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conv_id: convId, limit }) });
+    const r = await api("/api/mine/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conv_id: convId, limit }) }) as { by_kind?: Record<string, number>; skipped_batches?: number };
     const k = r.by_kind || {};
     showToast(`挖掘完成：术语 ${k.term || 0} · 称呼 ${k.alias || 0} · 任务 ${k.task || 0}${r.skipped_batches ? `（跳过 ${r.skipped_batches} 批）` : ""}`, true);
     loadMineCandidates();
   } catch (e) {
-    showToast("挖掘失败：" + e.message, false);
+    showToast("挖掘失败：" + (e as Error).message, false);
   }
 }
 
-async function decideMine(cid, action, btn) {
+async function decideMine(cid: number, action: string, btn: HTMLElement) {
   // 两步确认：拒绝需二次点击，防误触
   if (action === "reject" && btn.dataset.armed !== "1") {
     btn.dataset.armed = "1"; btn.textContent = "确认拒绝";
@@ -861,35 +873,35 @@ async function decideMine(cid, action, btn) {
     return;
   }
   try {
-    const r = await api(`/api/mine/candidates/${cid}/decide`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+    const r = await api(`/api/mine/candidates/${cid}/decide`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }) as { result?: { taskId?: number } };
     showToast(action === "accept" ? "已入库" : "已拒绝", true);
     loadMineCandidates();
     if (action === "accept" && r.result && r.result.taskId) {
       showToast(`任务 #${r.result.taskId} 已进看板待确认`, true);
     }
   } catch (e) {
-    showToast("操作失败：" + e.message, false);
+    showToast("操作失败：" + (e as Error).message, false);
   }
 }
 
 // ============ 迭代2 B3：术语手动增删改 ============
-let editingTerm = null; // 正在内联编辑释义的术语
+let editingTerm: string | null = null; // 正在内联编辑释义的术语
 
 async function addTermUI() {
-  const term = (document.getElementById("newTerm").value || "").trim();
-  const meaning = (document.getElementById("newTermMeaning").value || "").trim();
+  const term = ((document.getElementById("newTerm") as HTMLInputElement).value || "").trim();
+  const meaning = ((document.getElementById("newTermMeaning") as HTMLInputElement).value || "").trim();
   if (!term || !meaning) { showToast("术语和含义都要填", false); return; }
   try {
     await api("/api/term/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term, meaning }) });
     loadMemory();
     showToast("术语已添加", true);
   } catch (e) {
-    showToast("添加失败：" + e.message, false);
+    showToast("添加失败：" + (e as Error).message, false);
   }
 }
 
-async function saveTermEdit(term) {
-  const meaning = (document.getElementById("editTermMeaning").value || "").trim();
+async function saveTermEdit(term: string) {
+  const meaning = ((document.getElementById("editTermMeaning") as HTMLInputElement).value || "").trim();
   if (!meaning) { showToast("含义不能为空", false); return; }
   try {
     await api(`/api/term/${encodeURIComponent(term)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meaning }) });
@@ -897,11 +909,11 @@ async function saveTermEdit(term) {
     loadMemory();
     showToast("术语已更新", true);
   } catch (e) {
-    showToast("更新失败：" + e.message, false);
+    showToast("更新失败：" + (e as Error).message, false);
   }
 }
 
-async function deleteTerm(term, btn) {
+async function deleteTerm(term: string, btn: HTMLElement) {
   // 两步确认：第一次点变「确认删除?」，3 秒内再点才生效
   if (btn.dataset.armed !== "1") {
     btn.dataset.armed = "1";
@@ -914,22 +926,22 @@ async function deleteTerm(term, btn) {
     loadMemory();
     showToast("术语已删除", true);
   } catch (e) {
-    showToast("删除失败：" + e.message, false);
+    showToast("删除失败：" + (e as Error).message, false);
   }
 }
 
 // ============ 迭代2 B2：会议纪要 ============
-let _minutesConvs = []; // {id, name} 缓存，供下拉与卡片显示会话名
+let _minutesConvs: Array<{ id: string; name: string }> = []; // 缓存，供下拉与卡片显示会话名
 
 async function loadMinutes() {
   // 会话下拉：与左侧会话列表同源（P3 自建契约）
   try {
-    const res = await api("/api/conversations");
+    const res = await api("/api/conversations") as ApiResult & { conversations?: Array<{ conv_id: string; group_id?: string | number | null; name?: string | null }> };
     if (res.ok) {
       _minutesConvs = (res.conversations || []).map(c => ({ id: c.conv_id, name: c.name || `群 ${c.group_id}` }));
     }
   } catch (_) {}
-  const sel = document.getElementById("minutesConv");
+  const sel = document.getElementById("minutesConv") as HTMLSelectElement | null;
   if (sel && _minutesConvs.length) {
     const cur = sel.value;
     sel.innerHTML = _minutesConvs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)}</option>`).join("");
@@ -938,13 +950,13 @@ async function loadMinutes() {
   // 历史纪要列表
   const box = document.getElementById("minutesList");
   try {
-    const data = await api("/api/minutes");
+    const data = await api("/api/minutes") as { minutes?: Array<{ id: number; title: string; conv_id: string; msg_count: number; created_at?: string | null; summary?: string | null; decisions?: string[]; action_items?: Array<{ content: string; assignee_hint?: string | null; deadline_hint?: string | null }> }> };
     const list = data.minutes || [];
     if (!list.length) {
       box.innerHTML = `<div style="color:#8f959e;font-size:12px;">还没有纪要，选会话后点「生成纪要」</div>`;
       return;
     }
-    const convName = id => { const c = _minutesConvs.find(x => x.id === id); return c ? c.name : id; };
+    const convName = (id: string) => { const c = _minutesConvs.find(x => x.id === id); return c ? c.name : id; };
     box.innerHTML = list.map(m => `
       <div class="memory-block">
         <div class="memory-block-title">${esc(m.title)} <span style="color:#8f959e;font-size:11px;">${esc(convName(m.conv_id))} · ${m.msg_count} 条消息 · ${esc(String(m.created_at||"").slice(0,16))}</span></div>
@@ -957,13 +969,13 @@ async function loadMinutes() {
           </div>`).join("") : ""}
       </div>`).join("");
   } catch (e) {
-    box.innerHTML = `<div class='approval-empty'>加载失败：${esc(e.message)}</div>`;
+    box.innerHTML = `<div class='approval-empty'>加载失败：${esc((e as Error).message)}</div>`;
   }
 }
 
 async function generateMinutes() {
-  const convId = document.getElementById("minutesConv").value;
-  const limit = Number(document.getElementById("minutesLimit").value) || 50;
+  const convId = (document.getElementById("minutesConv") as HTMLSelectElement).value;
+  const limit = Number((document.getElementById("minutesLimit") as HTMLInputElement).value) || 50;
   if (!convId) { showToast("请先选择会话", false); return; }
   showToast("正在生成纪要…（LLM 需要几秒）", true);
   try {
@@ -971,24 +983,24 @@ async function generateMinutes() {
     loadMinutes();
     showToast("纪要已生成", true);
   } catch (e) {
-    showToast("生成失败：" + e.message, false);
+    showToast("生成失败：" + (e as Error).message, false);
   }
 }
 
-async function minutesToTask(mid, index) {
+async function minutesToTask(mid: number, index: number) {
   try {
-    const r = await api(`/api/minutes/${mid}/task`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index }) });
+    const r = await api(`/api/minutes/${mid}/task`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index }) }) as { taskId?: number };
     showToast(`已转入看板待确认（任务 #${r.taskId}）`, true);
   } catch (e) {
-    showToast("转任务失败：" + e.message, false);
+    showToast("转任务失败：" + (e as Error).message, false);
   }
 }
 
-function esc(s) {
+function esc(s: unknown) {
   return String(s == null ? "" : s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function renderAICard(r) {
+function renderAICard(r: AiCardResult) {
   const box = document.getElementById("messages");
   if (!box) return;
   const intent = r.intent || {};
@@ -1011,7 +1023,7 @@ function renderAICard(r) {
 }
 
 // 实时事件（网关收敛后：SSE 是唯一实时通道，消息/任务/卡片都走这里）
-let esAI = null;
+let esAI: EventSource | null = null;
 let _lastReconnectRefresh = 0;
 function initSSE() {
   if (!window.EventSource || esAI) return;
@@ -1032,7 +1044,7 @@ function initSSE() {
     };
     esAI.onmessage = (e) => {
       try {
-        const ev = JSON.parse(e.data);
+        const ev = JSON.parse(e.data) as { type?: string; client_msg_id?: string; db_id?: number | string; send_id?: string; sender_nickname?: string; content?: string; conv_id?: string; send_time?: number | null; ts?: number | null };
         if (ev.type === "message") {
           // P3：SSE 回声携带 db_id + client_msg_id 双去重键（评审 D3）
           const dedupKeys = [ev.client_msg_id, ev.db_id ? "db:" + ev.db_id : ""].filter(Boolean);
@@ -1069,7 +1081,7 @@ window.onload = () => {
   try {
     if (new URLSearchParams(location.search).has("debug")) localStorage.setItem("imai_debug", "1");
     if (localStorage.getItem("imai_debug") === "1") {
-      const st = document.querySelector(".sim-toggle");
+      const st = document.querySelector(".sim-toggle") as HTMLElement | null;
       if (st) st.style.display = "block";
     }
   } catch (_) {}
@@ -1103,7 +1115,7 @@ window.onload = () => {
 };
 
 // ============ JS 错误可见化（页面顶部红条；定位 WebView 内静默故障用） ============
-window.onerror = function(msg, src, line, col) {
+window.onerror = function(msg: string | Event, src?: string, line?: number, col?: number) {
   let bar = document.getElementById("jsErrorBar");
   if (!bar) {
     bar = document.createElement("div");
@@ -1120,11 +1132,11 @@ window.addEventListener("unhandledrejection", function(e) {
 });
 
 // ============ 事件委托（替代内联 onclick；CSP 无 unsafe-inline 也能工作） ============
-function escAttr(s) {
+function escAttr(s: unknown) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function _dispatchAction(el) {
+function _dispatchAction(el: HTMLElement) {
   const d = el.dataset;
   switch (d.action) {
     case "doLogin": doLogin(); break;
@@ -1161,18 +1173,18 @@ function _dispatchAction(el) {
     case "approveApproval": approveApproval(Number(d.approvalId)); break;
     case "rejectApproval": rejectApproval(Number(d.approvalId)); break;
     case "approvalFilter": loadApprovals(d.status);
-      document.querySelectorAll('#panel-approval .board-tabs .tab').forEach(t => t.classList.toggle("active", t.dataset.status === d.status)); break;
+      document.querySelectorAll('#panel-approval .board-tabs .tab').forEach(t => (t as HTMLElement).classList.toggle("active", (t as HTMLElement).dataset.status === d.status)); break;
     case "loadRbac": loadRbac(); break;
     case "loadRoles": loadRoles(); break;
     case "setRole": setRole(); break;
     case "loadAudit": loadAudit(); break;
-    case "tab": showPanel(d.panel); if (d.loader && window[d.loader]) window[d.loader](); break;
+    case "tab": showPanel(d.panel); if (d.loader) (window as unknown as Record<string, (() => void) | undefined>)[d.loader]?.(); break;
   }
 }
 
 document.addEventListener("click", (e) => {
-  let el = e.target;
-  while (el && el !== document) {
+  let el = e.target as HTMLElement | null;
+  while (el) {
     if (el.dataset && el.dataset.action) { _dispatchAction(el); return; }
     el = el.parentElement;
   }
@@ -1180,7 +1192,7 @@ document.addEventListener("click", (e) => {
 
 // 非点击类绑定（原内联 onkeydown/onchange）
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey && e.target && e.target.id === "msg") {
+  if (e.key === "Enter" && !e.shiftKey && e.target && (e.target as HTMLElement).id === "msg") {
     e.preventDefault();
     sendMsg();
   }
