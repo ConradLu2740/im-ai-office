@@ -587,6 +587,45 @@ async function cancelTask(id: number, btn: HTMLElement) {
   }
 }
 
+// 横排"需要你处理"确认卡（UI 骨架 v2 Task 8）：仅渲染 pending_confirmation 任务，
+// 样式复用 .ai-card（.strip .ai-card 由 styles.css 适配横排）；驳回展开/行内编辑与看板卡同用
+// _rejectingTaskId / editingTaskId 状态驱动（loadTasks 全量重渲染后自然展开/收起）
+function renderStripCard(t: TaskRow) {
+  const dlDate = parseDeadlineAt(t.deadline_at);
+  const isOverdue = dlDate && dlDate.getTime() < Date.now();
+  let btns: string;
+  if (editingTaskId === t.id) {
+    const dl = String(t.deadline_at || "").slice(0, 16).replace(" ", "T");
+    btns = `<div class="ai-card-btns" style="margin-top:10px;flex-wrap:wrap;gap:6px;">
+      <input id="editAssignee" value="${escAttr(t.assignee || "")}" placeholder="负责人"
+        style="flex:1;min-width:90px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+      <input id="editDeadline" type="datetime-local" value="${escAttr(dl)}"
+        style="padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
+      <button class="primary" data-action="saveTaskEdit" data-task-id="${t.id}">保存</button>
+      <button data-action="abortEdit">放弃</button>
+    </div>`;
+  } else if (_rejectingTaskId === t.id) {
+    btns = `<div class="ai-card-btns" style="margin-top:10px;flex-wrap:wrap;gap:6px;">
+      <span style="font-size:11px;color:#8f959e;align-self:center;">驳回原因：</span>
+      ${REJECT_REASONS.map((r) => `<button class="danger" data-action="rejectTaskReason" data-task-id="${t.id}" data-reason="${escAttr(r)}">${esc(r)}</button>`).join("")}
+      <button data-action="abortReject">取消</button>
+    </div>`;
+  } else {
+    btns = `<div class="ai-card-btns" style="margin-top:10px;">
+      <button class="primary" data-action="confirmTask" data-task-id="${t.id}">确认</button>
+      <button class="danger" data-action="rejectTask" data-task-id="${t.id}">驳回▾</button>
+      <button data-action="editTask" data-task-id="${t.id}">改负责人</button>
+    </div>`;
+  }
+  return `<div class="ai-card">
+    <div class="ai-card-header"><div class="aav">AI</div><div class="ai-card-title">${fmt(t.content)}</div><span class="kind">需要你处理</span></div>
+    <div class="ai-card-body" style="font-size:12px;color:#8f959e;">
+      #${t.id} · 负责人：${fmt(t.assignee)} · 截止：${fmt(t.deadline)}${dlDate ? ` · ${fmtDeadlineDate(dlDate)}` : ""}${isOverdue ? ` · <span style="color:#d64550;font-weight:600;">已逾期</span>` : ""}${t.source_msg ? `<br>来源：${esc(String(t.source_msg).slice(0, 60))}` : ""}
+    </div>
+    ${btns}
+  </div>`;
+}
+
 async function loadTasks() {
   try {
     const data = await api("/api/tasks") as { tasks?: TaskRow[] };
@@ -594,16 +633,31 @@ async function loadTasks() {
     const pendingAssignee = tasks.filter(t => t.status === "pending_assignee");
     const pending = tasks.filter(t => t.status === "pending_confirmation");
     const confirmed = tasks.filter(t => t.status === "confirmed");
-    const done = tasks.filter(t => t.status === "done");   // G1：已完成仍展示（✅ 徽标），排最后
+    const done = tasks.filter(t => t.status === "done");
     // 老化排序：越临近/越已过期的待决任务排越前，避免旧任务沉底被遗忘
     const byDeadline = (a: TaskRow, b: TaskRow) => (parseDeadlineAt(a.deadline_at)?.getTime() ?? Infinity) - (parseDeadlineAt(b.deadline_at)?.getTime() ?? Infinity);
     pendingAssignee.sort(byDeadline); pending.sort(byDeadline);
+    // 进行中：逾期（deadline_at < now）置顶，其余按截止时间升序（UI 骨架 v2 Task 8）
+    const now = Date.now();
+    confirmed.sort((a, b) => {
+      const oa = (parseDeadlineAt(a.deadline_at)?.getTime() ?? Infinity) < now ? 0 : 1;
+      const ob = (parseDeadlineAt(b.deadline_at)?.getTime() ?? Infinity) < now ? 0 : 1;
+      return oa - ob || byDeadline(a, b);
+    });
+    // 已完成：倒序，最近完成在前（updated_at 为完成时间）
+    done.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
     document.getElementById("countPendingAssignee").textContent = String(pendingAssignee.length);
     document.getElementById("countPending").textContent = String(pending.length);
     document.getElementById("countConfirmed").textContent = String(confirmed.length);
+    document.getElementById("countDone").textContent = String(done.length);
     document.getElementById("listPendingAssignee").innerHTML = pendingAssignee.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待指派任务</div>";
     document.getElementById("listPending").innerHTML = pending.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无待确认任务</div>";
-    document.getElementById("listConfirmed").innerHTML = confirmed.map(renderTaskCard).join("") + done.map(renderTaskCard).join("") || (confirmed.length + done.length ? "" : "<div style='color:#8f959e;font-size:12px;'>暂无已确认任务</div>");
+    document.getElementById("listConfirmed").innerHTML = confirmed.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无已确认任务</div>";
+    document.getElementById("listDone").innerHTML = done.map(renderTaskCard).join("") || "<div style='color:#8f959e;font-size:12px;'>暂无已完成任务</div>";
+    // 横排"需要你处理"：全部 pending_confirmation 平铺（不做用户过滤）；无则隐藏
+    const strip = document.getElementById("stripPending");
+    strip.innerHTML = pending.map(renderStripCard).join("");
+    strip.style.display = pending.length ? "" : "none";
     setBackendStatus(true, "后端已连接");
   } catch (e) {
     setBackendStatus(false, "后端未连接");
@@ -1101,6 +1155,7 @@ function initSSE() {
           }
         }
         if (ev.type === "task_created" || ev.type === "ai.card") loadTasks();
+        if (ev.type === "task_status") loadTasks(); // 确认/驳回/更新后的轻量收敛：全量刷新（5s 轮询兜底不变）
         if (ev.type === "task_completed") { loadTasks(); showToast("任务已完成 ✅", true); }
         if (ev.type === "task_created" || ev.type === "ai.card") updateAIUnread();
       } catch (_) {}
