@@ -15,6 +15,13 @@
       "when": 1788351714242,
       "tag": "0001_p3_chat_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788426000000,
+      "tag": "0002_p0_baseline_tables",
+      "breakpoints": true
     }
   ]
 }
