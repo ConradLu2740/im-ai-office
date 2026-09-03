@@ -1,6 +1,12 @@
 # IMAI · 对话式 AI 办公助手
 
-> 内部自用 · 单机本地部署 · TypeScript 全栈（Hono + Drizzle + Electron）· 零 Docker / 零 Python / 零 Rust 工具链
+> 内部自用 · 单机部署 + Tailscale 跨区域团队接入 · TypeScript 全栈（Hono + Drizzle + Electron）· 零 Docker / 零 Python / 零 Rust 工具链
+
+## 它是什么
+
+群聊里说“XX 下午写个报告”，AI 自动识别任务 → 确认卡找人拍板 → 看板跟进 → 到期提醒 → 完成闭环。
+界面为 UI 骨架 v2：左侧导航七视图（聊天/任务工作台/审批/记忆/汇总/权限/设置）、AI 统一卡片语言、三态存在规则、浅深双主题、记忆页拟人化。
+团队成员分布不同区域也能用：主机 + 全员装 Tailscale（免费加密组网）即可，见[团队部署](#团队部署tailscale-跨区域)。
 
 ## 架构一句话
 
@@ -33,7 +39,7 @@ im-ai-office/
 │   └── scripts/               # import-openim.mts（Mongo 一次性导入）/ set-password.mts（口令分发）
 ├── frontend-ts/               # 原生 TS 前端（esbuild 单文件打包到 web/）
 │   ├── src/api.ts             # API 层（hc<AppType> Hono RPC + Bearer 会话，无 @ts-nocheck）
-│   ├── src/app.ts             # UI 逻辑（DOM 欠账 @ts-nocheck 渐进收紧）
+│   ├── src/app.ts             # UI 逻辑（导航七视图/工作台/卡片系统，tsc 0 错误）
 │   ├── src/__sentinel__/      # RPC 契约哨兵测试（拼错端点/方法 → 编译失败）
 │   └── static/                # index.html / styles.css 单一来源
 ├── electron/                  # Electron 桌面壳（2026-09-02 替代 Tauri）
@@ -75,6 +81,13 @@ cd electron && npx electron-builder --win
 
 浏览器模式：直接访问 `http://127.0.0.1:8000`（Electron 壳加载的就是同一页面）。
 
+### 团队部署（Tailscale 跨区域）
+
+成员不在同一局域网时，主机与全员各装 [Tailscale](https://tailscale.com)（免费加密组网）并登录同一账号，
+浏览器访问主机虚拟 IP（如 `http://100.x.y.z:8000`）即可，数据端到端加密、零公网暴露。
+方案与风险详见 `docs/specs/团队分布式部署Tailscale-Spec.md`，同事接入三步见 `docs/同事接入说明书.md`。
+完整方案（含局域网直连模式）见 `交接文档.md` 部署章节。
+
 ### 4. 登录
 
 `/api/auth/login`（username + password → session token，30 天）。
@@ -95,10 +108,10 @@ cd electron && npx electron-builder --win
 
 ```bash
 cd backend-ts
-npx vitest run                          # 单元守卫 17 项（imai_test 库，fake LLM）
+npx vitest run                          # 单元守卫 23 项（G11-G18 + parser，imai_test 库，fake LLM）
 IMAI_E2E_BASE=http://localhost:8000 npx vitest run --config vitest.e2e.config.ts
                                         # acceptance 12 项 E2E（真实 LLM + 生产库，标记 e2e 自动清理）
-node ../scripts/quality-report.mjs      # 识别质量周报（只读）
+node ../scripts/quality-report.mjs      # 识别质量报告（含真实口径通过率/分源延迟，只读）
 ```
 
 测试约定：E2E 文本用「房间号/编号」等自然尾缀保证唯一（避开 30 分钟确定性去重窗口）；
@@ -118,4 +131,7 @@ git tag `python-backend-final`（Python 时代）与 `openim-era-final`（OpenIM
 | UNIQUE(conv_id, client_msg_id) | 并发去重最终防线（check-then-insert 历史踩坑根因模式） |
 | app_user.id 复用 OpenIM userID | 历史 message.sender_id / task.creator / role.oim_user_id 天然对齐，禁另起 id 体系 |
 | LLM 唯一锚点 getLlm() | 服务层禁直连 provider；测试 setLlmImpl 注入；max_tokens ≥4096（v4-flash 推理型输出） |
+| AI 三态规则 | 主动态（角标+卡片找人）/工作态（轻提示不弹窗）/静默态（隐形）——每个 AI 功能必须归属其一，防“为存在感而吵” |
+| 别名最长匹配优先 | 归属判定子串匹配时，长命中覆盖短别名（“小张为”不被短别名“小张”扩成多人歧义，G18） |
+| 静态资源 no-cache + 构建时间戳指纹 | 启发式磁盘缓存曾致 Electron 更新后仍跑旧 JS（SSE 自愈代码加载不到） |
 | esbuild 依赖全内联 | 后端 dist/index.js 单文件运行仅需 node，Electron 分发不打包 node_modules |
