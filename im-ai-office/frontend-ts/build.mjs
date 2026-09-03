@@ -13,6 +13,17 @@ for (const f of ["index.html", "styles.css"]) {
   fs.copyFileSync(path.resolve(import.meta.dirname, "static", f), path.join(outDir, f));
 }
 
+// 缓存破坏：构建时间戳写进 index.html 的资源引用 query（2026-09-03 实证：
+// 固定 ?v= 导致 Electron/浏览器磁盘缓存永久复用旧 app.js，SSE 自愈等新代码加载不到）
+const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+const htmlPath = path.join(outDir, "index.html");
+let html = fs.readFileSync(htmlPath, "utf-8");
+html = html
+  .replace(/app\.js\?v=[0-9]+/g, `app.js?v=${stamp}`)
+  .replace(/app\.js(?="|')/g, `app.js?v=${stamp}`)
+  .replace(/styles\.css\?v=[0-9]+/g, `styles.css?v=${stamp}`);
+fs.writeFileSync(htmlPath, html);
+
 const options = {
   entryPoints: ["src/app.ts"],
   bundle: true,
