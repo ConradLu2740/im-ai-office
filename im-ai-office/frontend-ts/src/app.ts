@@ -16,6 +16,12 @@ let currentUser: string | null = null;
 let currentToken: string | null = null;
 let currentConversation: ConvState | null = null;
 
+// ============ 角标 / 顶栏状态（UI 骨架 v2 Task 10/11，跨函数共享） ============
+let _taskPending = 0;   // 待确认 + 待指派（任务角标 / pill 主动态），loadTasks 维护
+let _chatUnread = 0;    // 群聊未读总数（/api/messages/unread 全量 + SSE 增量），loadConversations 维护
+let _aiUnread = 0;      // AI 助手未读（/api/ai_dm），updateAIUnread 维护
+let _pillBusy = false;  // 工作态：发送消息等待 AI 响应中
+
 
 function showToast(msg: string, ok = true) {
   let box = document.getElementById("toastBox");
@@ -50,6 +56,27 @@ function logDebug(info: unknown) {
   card.className = "ai-card";
   card.innerHTML = "<b>🐞 诊断信息</b><pre style='font-size:11px;color:#5a6482;'>" + JSON.stringify(info, null, 2) + "</pre>";
   document.getElementById("messages").appendChild(card);
+}
+
+// UI 骨架 v2 Task 10：导航角标。task = 待确认+待指派；chat = 群聊未读 + AI 助手未读；0 隐藏
+function updateBadges(taskPending: number, chatUnread: number) {
+  _taskPending = taskPending;
+  _chatUnread = chatUnread;
+  const bt = document.getElementById("bdg-task");
+  const bc = document.getElementById("bdg-chat");
+  const chatTotal = _chatUnread + _aiUnread;
+  if (bt) { bt.textContent = String(_taskPending); bt.style.display = _taskPending > 0 ? "flex" : "none"; }
+  if (bc) { bc.textContent = String(chatTotal); bc.style.display = chatTotal > 0 ? "flex" : "none"; }
+  updatePill();
+}
+
+// UI 骨架 v2 Task 11：顶栏 pill 三态简化（默认隐藏 / 主动态：有待确认 / 工作态：AI 处理中）
+function updatePill() {
+  const pill = document.getElementById("presencePill");
+  if (!pill) return;
+  if (_pillBusy) { pill.textContent = "AI 处理中…"; pill.style.display = ""; }
+  else if (_taskPending > 0) { pill.textContent = `有 ${_taskPending} 件事等你确认`; pill.style.display = ""; }
+  else pill.style.display = "none";
 }
 
 function setBackendStatus(ok: boolean, text: string) {
@@ -268,10 +295,34 @@ function enterMainApp() {
   document.getElementById("loginPage").classList.add("hidden");
   document.getElementById("mainApp").classList.remove("hidden");
   applyTheme();
+  syncSettingsUI();
+  showV2Onboarding();
   go(localStorage.getItem("imai_landing") || "chat");
   loadConversations();
   loadTasks();
   updateAIUnread();
+  updatePill();
+}
+
+// UI 骨架 v2 Task 11：设置页 radio 选中态回显（落地页 / 主题）
+function syncSettingsUI() {
+  const landing = localStorage.getItem("imai_landing") || "chat";
+  document.querySelectorAll<HTMLInputElement>("input[name='setLanding']").forEach(r => { r.checked = r.value === landing; });
+  const theme = localStorage.getItem("imai_theme") || "light";
+  document.querySelectorAll<HTMLInputElement>("input[name='setThemeMode']").forEach(r => { r.checked = r.value === theme; });
+}
+
+// UI 骨架 v2 Task 11：一次性引导条（localStorage.imai_v2_seen，「知道了」关闭后不再出现）
+function showV2Onboarding() {
+  try { if (localStorage.getItem("imai_v2_seen")) return; } catch (_) { return; }
+  const right = document.querySelector("#mainApp .right");
+  if (!right || document.getElementById("v2Tip")) return;
+  const bar = document.createElement("div");
+  bar.id = "v2Tip";
+  bar.style.cssText = "display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--grad,#4f6ef7);color:#fff;font-size:12px;border-radius:0 0 10px 10px;";
+  bar.innerHTML = `<span>新版上线：左侧导航切换视图；任务工作台汇总之所有待办；默认落地页可在设置修改</span>
+    <button data-action="dismissV2" style="margin-left:auto;background:rgba(255,255,255,.22);border:none;color:#fff;padding:3px 12px;border-radius:8px;cursor:pointer;font-size:12px;flex-shrink:0;">知道了</button>`;
+  right.insertBefore(bar, right.firstChild);
 }
 
 // ============ 会话 ============
@@ -283,7 +334,10 @@ async function loadConversations() {
     const unreadMap: Record<string, number> = {};
     try {
       const u = await api("/api/messages/unread") as { unread?: Array<{ conv_id: string; unread: number }> };
-      (u.unread || []).forEach(x => { unreadMap[x.conv_id] = x.unread; });
+      let total = 0;
+      (u.unread || []).forEach(x => { unreadMap[x.conv_id] = x.unread; total += x.unread; });
+      // 聊天角标数据源：unread 全量覆盖（Task 10）；AI 助手未读由 updateAIUnread 并入
+      updateBadges(_taskPending, total);
     } catch (_) {}
     renderConversations(res.conversations || [], unreadMap);
   } catch (e) {
@@ -331,8 +385,11 @@ async function updateAIUnread() {
     const res = await api("/api/ai_dm") as { unread?: number };
     const el = document.getElementById("aiUnread");
     const cnt = res.unread || 0;
+    _aiUnread = cnt;
     el.style.display = cnt ? "inline-block" : "none";
     el.textContent = String(cnt);
+    // AI 助手未读并入聊天导航角标（Task 10）
+    updateBadges(_taskPending, _chatUnread);
   } catch (e) {}
 }
 
@@ -432,6 +489,9 @@ async function sendMsg() {
   var cmid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(36).slice(2));
   _seenMsgIDs.add(cmid);
 
+  // 工作态 pill：发送后 await 响应前显示「AI 处理中…」，响应/失败后恢复（Task 11）
+  _pillBusy = true; updatePill();
+
   // AI 助手会话：回复数字确认
   if (currentConversation.type === "ai") {
     try {
@@ -445,6 +505,7 @@ async function sendMsg() {
     } catch (e) {
       showToast("确认异常：" + (e as Error).message, false);
     }
+    _pillBusy = false; updatePill();
     return;
   }
 
@@ -452,6 +513,7 @@ async function sendMsg() {
   try {
     if (currentConversation.type !== 3) {
       showToast("单聊发送将在切流后支持，请使用群聊", false);
+      _pillBusy = false; updatePill();
       return;
     }
     const payload = { conv_id: "sg_" + currentConversation.targetId, text, client_msg_id: cmid };
@@ -471,6 +533,7 @@ async function sendMsg() {
   } catch (e) {
     showToast("发送异常：" + (e as Error).message, false);
   }
+  _pillBusy = false; updatePill();
 }
 
 // ============ 看板 ============
@@ -658,6 +721,8 @@ async function loadTasks() {
     const strip = document.getElementById("stripPending");
     strip.innerHTML = pending.map(renderStripCard).join("");
     strip.style.display = pending.length ? "" : "none";
+    // 任务角标数据源：待确认 + 待指派（Task 10）；聊天未读用模块级缓存，避免覆盖
+    updateBadges(pending.length + pendingAssignee.length, _chatUnread);
     setBackendStatus(true, "后端已连接");
   } catch (e) {
     setBackendStatus(false, "后端未连接");
@@ -1183,6 +1248,11 @@ function initSSE() {
               conversationID: ev.conv_id,
               sendTime: ev.send_time || ev.ts || Date.now(),
             });
+            // 聊天角标即时 +1：非当前会话且非自己发的消息（当前会话由已读水位上报，下次轮询校正）
+            if (ev.send_id !== currentUser && (!currentConversation || ev.conv_id !== currentConversation.id)) {
+              _chatUnread++;
+              updateBadges(_taskPending, _chatUnread);
+            }
             // 正在看的会话 → 上报已读水位
             if (currentConversation && ev.conv_id === currentConversation.id && ev.db_id) {
               api("/api/messages/read", { method: "POST", body: JSON.stringify({ conv_id: ev.conv_id, last_msg_id: ev.db_id }) }).catch(() => {});
@@ -1269,6 +1339,7 @@ function _dispatchAction(el: HTMLElement) {
     case "toggleTheme": toggleTheme(); break;
     case "setLanding": localStorage.setItem("imai_landing", (el as HTMLInputElement).value || "chat"); showToast("默认落地页已设为 " + (el as HTMLInputElement).value, true); break;
     case "setThemeMode": { const mv = (el as HTMLInputElement).value || "light"; localStorage.setItem("imai_theme", mv); applyTheme(mv); break; }
+    case "dismissV2": { try { localStorage.setItem("imai_v2_seen", "1"); } catch (_) {} const tip = document.getElementById("v2Tip"); if (tip) tip.remove(); break; }
     case "loadGatewayConversations": loadConversations(); break; // 兼容旧调试入口
     case "loadTasks": loadTasks(); break;
     case "toggleSim": toggleSim(); break;
