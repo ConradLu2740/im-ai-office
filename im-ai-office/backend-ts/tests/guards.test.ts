@@ -203,4 +203,42 @@ describe("G14 · 驳回原因选择器", () => {
     expect(mem.length).toBe(0);
   });
 });
+describe("G15 · 任务状态变化补发 task_status SSE 事件", () => {
+  it("confirm/reject/update 各 fanout 一条 task_status（含 taskId 与状态）", async () => {
+    const mkTask = async (content: string, status: string): Promise<number> => {
+      await query("INSERT INTO task(content,creator,assignee,deadline,status,confidence,source_msg) VALUES($1,$2,$3,$4,$5,$6,$7)",
+        [content, "user001", "张三", "周五前", status, "high", "s"]);
+      return Number((await one("SELECT id FROM task WHERE content=$1 ORDER BY id DESC LIMIT 1", [content]))!.id);
+    };
+    const pendingId = await mkTask("G15待确认任务", "pending_confirmation");
+    const confirmedId = await mkTask("G15已确认任务A", "confirmed");
+    const confirmedId2 = await mkTask("G15已确认任务B", "confirmed");
+
+    const events: string[] = [];
+    const { subscribe, unsubscribe } = await import("../src/sse.js");
+    const sink = (line: string) => events.push(line);
+    subscribe(sink);
+    try {
+      const r1 = await post(`/api/tasks/${pendingId}/confirm`, {});
+      expect(r1.ok).toBe(true);
+      const r2 = await post(`/api/tasks/${confirmedId}/reject`, { reason: "不需要建任务" });
+      expect(r2.ok).toBe(true);
+      const r3 = await request(`/api/tasks/${confirmedId2}`, "PATCH", { assignee: "李娜" });
+      expect(r3.ok).toBe(true);
+
+      const statusEvents = events
+        .map((line) => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return null; } })
+        .filter((e): e is Record<string, unknown> => e !== null && e.type === "task_status");
+      expect(statusEvents.length).toBe(3);
+      const byTask = (id: number) => statusEvents.find((e) => e.taskId === id);
+      expect(byTask(pendingId)).toBeDefined();
+      expect(byTask(confirmedId)).toBeDefined();
+      expect(byTask(confirmedId2)).toBeDefined();
+      // confirm → confirmed；reject → rejected；PATCH 改 assignee 状态保持当前值（至少含 confirmed）
+      expect((byTask(pendingId) as Record<string, unknown>).status).toBe("confirmed");
+      expect((byTask(confirmedId) as Record<string, unknown>).status).toBe("rejected");
+      expect(statusEvents.some((e) => e.status === "confirmed")).toBe(true);
+    } finally { unsubscribe(sink); }
+  });
+});
 void pool;

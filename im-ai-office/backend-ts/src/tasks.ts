@@ -19,6 +19,7 @@ export async function confirmTask(taskId: number, assignee?: string | null, _dea
     await db.update(task).set({ status: "confirmed", ...touch }).where(eq(task.id, taskId));
   }
   await auditLog("user", "confirm", { taskId });
+  fanout("task_status", { taskId, status: "confirmed" });
   return true;
 }
 
@@ -32,6 +33,7 @@ export async function rejectTask(taskId: number, reason?: string | null): Promis
     const { memorizeRejectSignal } = await import("./memory.js");
     await memorizeRejectSignal(reason, taskId);
   }
+  fanout("task_status", { taskId, status: "rejected" });
   return true;
 }
 
@@ -68,5 +70,6 @@ export async function updateTask(
   }
   await auditLog("user", "task_update", { taskId, changes });
   const updated = await getTaskDict(taskId);
+  fanout("task_status", { taskId, status: updated!.status ?? "" });
   return { task: updated! };
 }
