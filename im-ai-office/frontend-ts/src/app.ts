@@ -327,6 +327,8 @@ function showV2Onboarding() {
 
 // ============ 会话 ============
 async function loadConversations() {
+  // 未登录时静默跳过（自愈轮询每 15s 会调本函数，匿名请求会 401 弄脏界面提示）
+  if (!currentToken) return;
   // P3 自建聊天层：会话列表来自 user_group + message 聚合（不再依赖 OpenIM REST）
   try {
     const res = await api("/api/conversations") as ApiResult & { conversations?: Array<{ conv_id: string; group_id?: string | number | null; name?: string | null; last_message?: string | null }> };
@@ -1320,8 +1322,8 @@ window.onload = () => {
       });
   }
   setInterval(checkBackend, 3000);
-  setInterval(loadTasks, 5000);
-  setInterval(updateAIUnread, 5000);
+  setInterval(() => { if (currentToken) loadTasks(); }, 5000);
+  setInterval(() => { if (currentToken) updateAIUnread(); }, 5000);
   initSSE();   // 新增：实时事件推送（轮询保留作兑底）
   if (getTauriInvoke()) setTimeout(startBackend, 500);
 };
