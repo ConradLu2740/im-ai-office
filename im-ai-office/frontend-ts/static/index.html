@@ -1,154 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>IMAI办公助手</title>
-<style>
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; overflow: hidden; }
-  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #1f2329; }
-  .app { display: flex; height: 100vh; }
-
-  /* 登录页 */
-  .login-page { display: flex; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #1E2761 0%, #3a4db8 100%); }
-  .login-box { background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); width: 360px; }
-  .login-box h1 { font-size: 24px; margin: 0 0 8px; text-align: center; color: #1E2761; }
-  .login-box .sub { text-align: center; color: #5a6482; font-size: 13px; margin-bottom: 24px; }
-  .login-box input { width: 100%; padding: 12px 14px; border: 1px solid #e8eaf0; border-radius: 10px; font-size: 14px; margin-bottom: 12px; outline: none; }
-  .login-box input:focus { border-color: #1E2761; }
-  .login-box button { width: 100%; padding: 12px; background: #1E2761; color: #fff; border: none; border-radius: 10px; font-size: 15px; cursor: pointer; margin-top: 8px; }
-  .login-box button:hover { background: #2a37a0; }
-  .user-switch { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .user-switch label { font-size: 12px; color: #8f959e; white-space: nowrap; }
-  .user-switch select { flex: 1; padding: 10px 12px; border: 1px solid #e8eaf0; border-radius: 10px; font-size: 13px; background: #fff; color: #1E2761; outline: none; cursor: pointer; }
-  .user-switch select:focus { border-color: #1E2761; }
-  .login-box .tip { margin-top: 16px; text-align: center; font-size: 12px; color: #8f959e; }
-
-  /* 左侧导航 */
-  .sidebar { width: 64px; background: #1E2761; display: flex; flex-direction: column; align-items: center; padding: 16px 0; }
-  .logo { width: 36px; height: 36px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; font-weight: bold; color: #1E2761; font-size: 14px; }
-  .nav-item { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.6); margin-bottom: 8px; cursor: pointer; transition: 0.2s; font-size: 20px; }
-  .nav-item:hover, .nav-item.active { background: rgba(255,255,255,0.12); color: #fff; }
-  .nav-bottom { margin-top: auto; }
-
-  /* 会话列表 */
-  .session-list { width: 240px; background: #fff; border-right: 1px solid #e8eaf0; display: flex; flex-direction: column; }
-  .session-header { padding: 16px; border-bottom: 1px solid #f0f1f5; }
-  .session-header h2 { font-size: 18px; margin: 0; }
-  .session-search { padding: 12px 16px; }
-  .session-search input { width: 100%; padding: 8px 12px; border: 1px solid #e8eaf0; border-radius: 8px; font-size: 13px; background: #f7f8fa; }
-  .session { padding: 12px 16px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
-  .session:hover { background: #f7f8fa; }
-  .session.active { background: #eef2fb; }
-  .avatar { width: 40px; height: 40px; border-radius: 10px; background: #1E2761; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500; }
-  .avatar.ai { background: linear-gradient(135deg, #1E2761, #3a4db8); }
-  .session-info { flex: 1; min-width: 0; }
-  .session-title { font-size: 14px; font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .session-preview { font-size: 12px; color: #8f959e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .session-meta { text-align: right; }
-  .session-time { font-size: 11px; color: #8f959e; }
-  .badge { display: inline-block; min-width: 18px; height: 18px; line-height: 18px; text-align: center; background: #d64550; color: #fff; border-radius: 9px; font-size: 11px; padding: 0 5px; margin-top: 4px; }
-
-  /* 聊天区 */
-  .chat { flex: 1; display: flex; flex-direction: column; background: #fff; min-width: 260px; }
-  .chat-header { padding: 14px 20px; border-bottom: 1px solid #f0f1f5; display: flex; align-items: center; justify-content: space-between; }
-  .chat-title { font-size: 16px; font-weight: 600; }
-  .chat-sub { font-size: 12px; color: #8f959e; margin-top: 2px; }
-  .chat-actions { display: flex; gap: 8px; }
-  .chat-actions button { background: #f2f3f5; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; color: #5a6482; cursor: pointer; }
-  .messages { flex: 1; overflow-y: auto; padding: 20px; background: #f9fafc; }
-  .msg { display: flex; gap: 10px; margin-bottom: 20px; }
-  .msg.self { flex-direction: row-reverse; }
-  .msg.self .msg-content { background: #1E2761; color: #fff; border-radius: 16px 16px 4px 16px; }
-  .msg-content { background: #fff; padding: 12px 14px; border-radius: 16px 16px 16px 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); max-width: 70%; font-size: 14px; line-height: 1.5; }
-  .msg-meta { font-size: 11px; color: #8f959e; margin-top: 4px; padding: 0 4px; }
-  .msg.self .msg-meta { text-align: right; }
-
-  /* AI 卡片 */
-  .ai-card { background: #fff; border: 1px solid #e8eaf0; border-radius: 12px; padding: 16px; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-  .ai-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .ai-icon { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(135deg, #1E2761, #3a4db8); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; }
-  .ai-card-title { font-weight: 600; font-size: 14px; }
-  .ai-card-body { font-size: 13px; color: #5a6482; line-height: 1.6; }
-  .ai-card-body b { color: #1E2761; }
-  .ai-card-btns { display: flex; gap: 8px; margin-top: 12px; }
-  .ai-card-btns button { border: none; padding: 7px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; }
-  .ai-card-btns .primary { background: #1a9e6c; color: #fff; }
-  .ai-card-btns .secondary { background: #f2f3f5; color: #5a6482; }
-  .ai-card-btns .danger { background: #fae1e3; color: #d64550; }
-
-  /* 输入区 */
-  .input-area { padding: 16px 20px; border-top: 1px solid #f0f1f5; background: #fff; }
-  .sim-area { border-top: 1px solid #f0f1f5; background: #fbfcfe; }
-  .sim-toggle { display: none; padding: 8px 20px; font-size: 12px; color: #5a6482; cursor: pointer; user-select: none; }
-  .sim-toggle:hover { color: #1E2761; }
-  .sim-box { padding: 8px 20px 12px; display: flex; gap: 8px; }
-  .sim-input { flex: 1; padding: 7px 10px; border: 1px solid #e8eaf0; border-radius: 8px; font-size: 12px; }
-  .sim-btn { background: #1E2761; color: #fff; border: none; padding: 7px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; }
-  .input-box { display: flex; align-items: flex-end; gap: 10px; background: #f5f6fa; border-radius: 12px; padding: 10px 12px; }
-  .input-box textarea { flex: 1; border: none; background: transparent; resize: none; font-size: 14px; outline: none; min-height: 20px; max-height: 120px; font-family: inherit; }
-  .input-box button { background: #1E2761; color: #fff; border: none; width: 34px; height: 34px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-
-  /* 右侧看板 */
-  .board { width: 340px; background: #fff; border-left: 1px solid #e8eaf0; display: flex; flex-direction: column; }
-  .board-header { padding: 12px 16px; border-bottom: 1px solid #f0f1f5; }
-  .board-tabs { display: flex; gap: 8px; }
-  .board-tabs .tab { background: #f2f3f5; border: none; padding: 6px 14px; border-radius: 8px; font-size: 13px; color: #5a6482; cursor: pointer; }
-  .board-tabs .tab.active { background: #1E2761; color: #fff; }
-  .board-columns { flex: 1; overflow-y: auto; padding: 16px; padding-bottom: 72px; }
-  .panel-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .panel-title { font-size: 13px; font-weight: 600; color: #1E2761; }
-  .panel-toolbar button { background: #f2f3f5; border: none; padding: 5px 12px; border-radius: 6px; font-size: 12px; color: #5a6482; cursor: pointer; }
-  .approval-item { background: #f9fafc; border: 1px solid #eef0f4; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-  .approval-item .a-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-  .approval-item .a-action { font-weight: 600; font-size: 13px; color: #1E2761; }
-  .approval-item .a-detail { font-size: 12px; color: #5a6482; white-space: pre-wrap; margin-bottom: 10px; }
-  .approval-item .a-btns { display: flex; gap: 8px; }
-  .approval-item .a-btns button { flex: 1; border: none; padding: 7px; border-radius: 8px; font-size: 13px; cursor: pointer; }
-  .approval-item .a-yes { background: #1a9e6c; color: #fff; }
-  .approval-item .a-no { background: #f2f3f5; color: #5a6482; }
-  .approval-empty { text-align: center; color: #8f959e; font-size: 13px; padding: 32px 0; }
-  /* M3 权限可视化 */
-  .rbac-section { margin-bottom: 20px; }
-  .role-badge { font-size: 11px; padding: 2px 10px; border-radius: 10px; background: #f2f3f5; color: #5a6482; }
-  .role-badge.role-admin { background: #1E2761; color: #fff; }
-  .role-form { display: flex; gap: 8px; margin-top: 12px; }
-  .role-form input { flex: 1; border: 1px solid #e5e7ee; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
-  .role-form select { border: 1px solid #e5e7ee; border-radius: 8px; padding: 8px; font-size: 13px; background: #fff; }
-  .audit-item .a-detail { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .memory-block { margin-bottom: 16px; }
-  .memory-block-title { font-size: 13px; font-weight: 600; color: #5a6482; margin-bottom: 8px; }
-  .memory-term { font-size: 13px; color: #1E2761; margin-bottom: 6px; }
-  .memory-term b { color: #1a9e6c; }
-  .summary-text { font-size: 13px; color: #2a3245; line-height: 1.7; background: #f9fafc; border: 1px solid #eef0f4; border-radius: 10px; padding: 14px; white-space: pre-wrap; }
-  .board-col-title { font-size: 13px; font-weight: 600; color: #5a6482; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-  .board-col-title span { color: #8f959e; font-weight: normal; }
-  .task-card { background: #f9fafc; border-radius: 10px; padding: 12px; margin-bottom: 8px; border: 1px solid #f0f1f5; }
-  .task-card.overdue { background: #fdf5f6; border-color: #f3c1c6; }
-  .task-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
-  .task-card-meta { font-size: 11px; color: #8f959e; display: flex; align-items: center; gap: 8px; }
-  .task-proof { font-size: 10px; color: #1a9e6c; margin-top: 6px; line-height: 1.4; }
-  .task-card-meta .tag { padding: 1px 6px; border-radius: 4px; font-size: 10px; }
-  .task-card-meta .tag-overdue { background: #fdeaea; color: #d64550; font-weight: 600; }
-  .tag-high { background: #e5f8ef; color: #1a9e6c; }
-  .tag-mid { background: #fff2e2; color: #b2500f; }
-  .tag-low { background: #f0f1f6; color: #5a6482; }
-
-  /* 后端状态 */
-  .backend-status { position: fixed; bottom: 12px; right: 18px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #5a6482; background: rgba(255,255,255,0.92); padding: 4px 10px; border-radius: 20px; z-index: 100; box-shadow: 0 1px 4px rgba(30,39,97,0.10); }
-  .backend-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #d64550; }
-  .backend-status .dot.ok { background: #1a9e6c; }
-  .backend-status button { display: none; padding: 2px 8px; font-size: 11px; border: none; border-radius: 4px; background: #1E2761; color: #fff; cursor: pointer; }
-
-  /* 窄窗口：聊天区优先，看板面板让位隐藏（桌面端默认窗口宽，不受影响） */
-  @media (max-width: 860px) {
-    .board { display: none; }
-    .chat { min-width: 0; }
-  }
-
-  .hidden { display: none !important; }
-</style>
+<link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
@@ -175,152 +31,208 @@
 
 <!-- 主界面 -->
 <div class="app hidden" id="mainApp">
-  <div class="sidebar">
+
+  <!-- 左侧导航（76px） -->
+  <div class="nav">
     <div class="logo">IM</div>
-    <div class="nav-item active" title="消息">💬</div>
-    <div class="nav-item" title="任务">📋</div>
-    <div class="nav-item" title="通讯录">👥</div>
-    <div class="nav-item nav-bottom" title="设置" data-action="logout">⏻</div>
+    <button class="nitem" data-action="nav" data-view="chat" title="聊天">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3c-1.5 0-2.9-.3-4.1-1L3 20l1.3-4.2A8.1 8.1 0 0 1 3.5 11.5 8.4 8.4 0 0 1 12 3.2a8.4 8.4 0 0 1 9 8.3z"/></svg>
+      <div class="lb">聊天</div><span class="bdg" id="bdg-chat"></span>
+    </button>
+    <button class="nitem" data-action="nav" data-view="task" title="任务">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="4.5" height="10" rx="1.2"/><rect x="9.8" y="4" width="4.5" height="16" rx="1.2"/><rect x="15.5" y="4" width="4.5" height="7" rx="1.2"/></svg>
+      <div class="lb">任务</div><span class="bdg" id="bdg-task"></span>
+    </button>
+    <button class="nitem" data-action="nav" data-view="approval" title="审批">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 7.9-7.5 9.5-4.3-1.6-7.5-4.9-7.5-9.5V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg>
+      <div class="lb">审批</div>
+    </button>
+    <button class="nitem" data-action="nav" data-view="memory" title="记忆">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.8 4.6 4.7 1.7-4.7 1.7L12 16.1l-1.8-4.6-4.7-1.7 4.7-1.7z"/><circle cx="18.5" cy="17.5" r="1.4"/><circle cx="6" cy="18.5" r="1.1"/></svg>
+      <div class="lb">记忆</div>
+    </button>
+    <button class="nitem" data-action="nav" data-view="summary" title="汇总">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3.5"/></svg>
+      <div class="lb">汇总</div>
+    </button>
+    <button class="nitem" data-action="nav" data-view="rbac" title="权限">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8.5" r="4.2"/><path d="M11.6 11.6L20 20"/><path d="M16.5 16.5l-2 2"/><path d="M19 19l-1.4 1.4"/></svg>
+      <div class="lb">权限</div>
+    </button>
+    <div class="sp"></div>
+    <button class="nitem" data-action="nav" data-view="settings" title="设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/></svg>
+      <div class="lb">设置</div>
+    </button>
   </div>
 
-  <div class="session-list">
-    <div class="session-header"><h2>消息</h2><button data-action="loadGatewayConversations" style="margin-left:auto;padding:4px 10px;border:1px solid #e0e3ec;background:#fff;border-radius:8px;cursor:pointer;font-size:12px;color:#5a6482;">刷新</button></div>
-    <div class="session-search"><input type="text" placeholder="搜索会话" /></div>
-    <div id="sessionList"></div>
-  </div>
-
-  <div class="chat">
-    <div class="chat-header">
-      <div>
-        <div class="chat-title" id="chatTitle">选择会话</div>
-        <div class="chat-sub" id="chatSub">点击左侧会话开始聊天</div>
-      </div>
-      <div class="chat-actions">
-        <button data-action="loadTasks">刷新看板</button>
-      </div>
-    </div>
-    <div class="messages" id="messages"></div>
-    <div class="sim-area">
-      <div class="sim-toggle" data-action="toggleSim">🛠 模拟群消息（测试用）</div>
-      <div class="sim-box" id="simBox" style="display:none;">
-        <input id="simSender" class="sim-input" placeholder="发言人，如 王冰" value="王冰" />
-        <input id="simText" class="sim-input" placeholder="消息内容，如 这次活动我来出物料清单，下周三前" />
-        <button data-action="sendSim" class="sim-btn">发送</button>
-      </div>
-    </div>
-    <div class="input-area">
-      <div class="input-box">
-        <textarea id="msg" rows="1" placeholder="输入消息...（Enter 发送）"></textarea>
-        <button data-action="sendMsg">➤</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="board">
-    <div class="board-header">
-      <div class="board-tabs">
-        <button class="tab active" data-action="tab" data-panel="board">看板</button>
-        <button class="tab" data-action="tab" data-panel="approval" data-loader="loadApprovals">审批</button>
-        <button class="tab" data-action="tab" data-panel="rbac" data-loader="loadRbac">权限</button>
-        <button class="tab" data-action="tab" data-panel="memory" data-loader="loadMemory">记忆</button>
-        <button class="tab" data-action="tab" data-panel="summary" data-loader="loadSummary">汇总</button>
-        <button class="tab" data-action="tab" data-panel="minutes" data-loader="loadMinutes">纪要</button>
-      </div>
+  <!-- 右区：顶栏 + 视图容器 -->
+  <div class="right">
+    <div class="topbar">
+      <div class="t" id="viewTitle">聊天</div>
+      <div class="pill" id="presencePill">AI 在线</div>
+      <div class="sp"></div>
+      <button class="tbtn" id="themeBtn" data-action="toggleTheme" title="切换深浅主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/></svg>
+      </button>
+      <div class="pill" id="meUser">admin</div>
     </div>
 
-    <div class="board-columns" id="panel-board">
-      <div class="board-col">
-        <div class="board-col-title">待指派 <span id="countPendingAssignee">0</span></div>
-        <div id="listPendingAssignee"></div>
+    <!-- 聊天视图（旧 DOM 原样挪入） -->
+    <div class="view" id="view-chat">
+      <div class="convs">
+        <div class="sec">会话
+          <button data-action="loadGatewayConversations" style="margin-left:auto;padding:3px 10px;border:1px solid var(--border);background:var(--panel);border-radius:8px;cursor:pointer;font-size:11px;color:var(--muted);">刷新</button>
+        </div>
+        <div class="session-list-fill" id="sessionList"></div>
       </div>
-      <div class="board-col">
-        <div class="board-col-title">待确认 <span id="countPending">0</span></div>
-        <div id="listPending"></div>
-      </div>
-      <div class="board-col">
-        <div class="board-col-title">已确认 <span id="countConfirmed">0</span></div>
-        <div id="listConfirmed"></div>
-      </div>
-    </div>
-
-    <div class="board-columns" id="panel-approval" style="display:none;">
-      <div class="panel-toolbar">
-        <span class="panel-title">高风险动作审批</span>
-        <div class="board-tabs">
-          <button class="tab active" data-action="approvalFilter" data-status="pending">待审批</button>
-          <button class="tab" data-action="approvalFilter" data-status="approved">已批准</button>
-          <button class="tab" data-action="approvalFilter" data-status="rejected">已拒绝</button>
-          <button data-action="loadApprovals">刷新</button>
+      <div class="chat">
+        <div class="chat-header">
+          <div>
+            <div class="chat-title" id="chatTitle">选择会话</div>
+            <div class="chat-sub" id="chatSub">点击左侧会话开始聊天</div>
+          </div>
+          <div class="chat-actions">
+            <button data-action="loadTasks">刷新看板</button>
+          </div>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="sim-area">
+          <div class="sim-toggle" data-action="toggleSim">🛠 模拟群消息（测试用）</div>
+          <div class="sim-box" id="simBox" style="display:none;">
+            <input id="simSender" class="sim-input" placeholder="发言人，如 王冰" value="王冰" />
+            <input id="simText" class="sim-input" placeholder="消息内容，如 这次活动我来出物料清单，下周三前" />
+            <button data-action="sendSim" class="sim-btn">发送</button>
+          </div>
+        </div>
+        <div class="input-area">
+          <div class="input-box">
+            <textarea id="msg" rows="1" placeholder="输入消息...（Enter 发送）"></textarea>
+            <button data-action="sendMsg">➤</button>
+          </div>
         </div>
       </div>
-      <div id="approvalList" class="approval-list"></div>
     </div>
 
-    <div class="board-columns" id="panel-rbac" style="display:none;">
-      <div class="rbac-section">
+    <!-- 任务工作台视图（空壳，后续 Task 填充渲染） -->
+    <div class="view task" id="view-task">
+      <div class="strip" id="stripPending"></div>
+      <div class="cols">
+        <div class="col"><div class="ct">待指派 <span class="n" id="countPendingAssignee">0</span></div><div id="listPendingAssignee"></div></div>
+        <div class="col"><div class="ct">待确认 <span class="n" id="countPending">0</span></div><div id="listPending"></div></div>
+        <div class="col"><div class="ct">已确认 <span class="n" id="countConfirmed">0</span></div><div id="listConfirmed"></div></div>
+        <div class="col"><div class="ct">已完成 <span class="n" id="countDone">0</span></div><div id="listDone"></div></div>
+      </div>
+    </div>
+
+    <!-- 审批视图（旧 panel-approval DOM 原样挪入） -->
+    <div class="view func" id="view-approval">
+      <div id="panel-approval">
         <div class="panel-toolbar">
-          <span class="panel-title">成员角色</span>
-          <button data-action="loadRoles">刷新</button>
+          <span class="panel-title">高风险动作审批</span>
+          <div class="board-tabs">
+            <button class="tab active" data-action="approvalFilter" data-status="pending">待审批</button>
+            <button class="tab" data-action="approvalFilter" data-status="approved">已批准</button>
+            <button class="tab" data-action="approvalFilter" data-status="rejected">已拒绝</button>
+            <button data-action="loadApprovals">刷新</button>
+          </div>
         </div>
-        <div style="font-size:12px;color:#8f959e;margin-bottom:10px;">未列出的用户默认 member；imAdmin 固定为 group_admin。修改角色需管理权限。</div>
-        <div id="roleList" class="approval-list"></div>
-        <div class="role-form">
-          <input id="roleUserId" placeholder="OpenIM 用户ID（如 user001）" />
-          <select id="roleValue">
-            <option value="member">member</option>
-            <option value="group_admin">group_admin</option>
-          </select>
-          <button class="primary" data-action="setRole">保存角色</button>
-        </div>
+        <div id="approvalList" class="approval-list"></div>
       </div>
-      <div class="rbac-section">
+    </div>
+
+    <!-- 汇总视图（旧 panel-summary + panel-minutes DOM 原样挪入） -->
+    <div class="view func" id="view-summary">
+      <div id="panel-summary">
         <div class="panel-toolbar">
-          <span class="panel-title">审计日志（关键动作留痕）</span>
-          <button data-action="loadAudit">刷新</button>
+          <span class="panel-title">今日汇总（未定归属）</span>
+          <button data-action="loadSummary">生成</button>
         </div>
-        <div id="auditList" class="approval-list"></div>
+        <div id="summaryBox" class="summary-box"></div>
       </div>
-    </div>
-
-    <div class="board-columns" id="panel-memory" style="display:none;">
-      <div class="panel-toolbar">
-        <span class="panel-title">团队记忆</span>
-        <button data-action="loadMemory">刷新</button>
-      </div>
-      <div id="memoryHtml" class="memory-box"></div>
-      <div class="memory-block" style="margin-top:12px;">
-        <div class="memory-block-title">历史挖掘（术语 / 称呼 / 遗漏任务）</div>
-        <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;margin-bottom:8px;">
-          <select id="mineConv" style="flex:2;min-width:140px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;"></select>
-          <input id="mineLimit" type="number" value="500" min="1" max="2000"
-            style="width:76px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
-          <button class="primary" data-action="runMining">跑挖掘</button>
+      <div id="panel-minutes" style="margin-top:16px;">
+        <div class="panel-toolbar">
+          <span class="panel-title">会议纪要</span>
+          <button data-action="loadMinutes">刷新</button>
         </div>
-        <div id="mineCands" class="memory-box" style="padding:0;"></div>
+        <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+          <select id="minutesConv" style="flex:2;min-width:140px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--cardbg);"></select>
+          <input id="minutesLimit" type="number" value="50" min="1" max="500"
+            style="width:70px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--cardbg);">
+          <button class="primary" data-action="generateMinutes">生成纪要</button>
+        </div>
+        <div id="minutesList" class="memory-box"></div>
       </div>
     </div>
 
-    <div class="board-columns" id="panel-summary" style="display:none;">
-      <div class="panel-toolbar">
-        <span class="panel-title">今日汇总（未定归属）</span>
-        <button data-action="loadSummary">生成</button>
+    <!-- 权限视图（旧 panel-rbac DOM 原样挪入） -->
+    <div class="view func" id="view-rbac">
+      <div id="panel-rbac">
+        <div class="rbac-section">
+          <div class="panel-toolbar">
+            <span class="panel-title">成员角色</span>
+            <button data-action="loadRoles">刷新</button>
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">未列出的用户默认 member；imAdmin 固定为 group_admin。修改角色需管理权限。</div>
+          <div id="roleList" class="approval-list"></div>
+          <div class="role-form">
+            <input id="roleUserId" placeholder="OpenIM 用户ID（如 user001）" />
+            <select id="roleValue">
+              <option value="member">member</option>
+              <option value="group_admin">group_admin</option>
+            </select>
+            <button class="primary" data-action="setRole" style="background:var(--grad);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;">保存角色</button>
+          </div>
+        </div>
+        <div class="rbac-section">
+          <div class="panel-toolbar">
+            <span class="panel-title">审计日志（关键动作留痕）</span>
+            <button data-action="loadAudit">刷新</button>
+          </div>
+          <div id="auditList" class="approval-list"></div>
+        </div>
       </div>
-      <div id="summaryBox" class="summary-box"></div>
     </div>
 
-    <div class="board-columns" id="panel-minutes" style="display:none;">
-      <div class="panel-toolbar">
-        <span class="panel-title">会议纪要</span>
-        <button data-action="loadMinutes">刷新</button>
+    <!-- 记忆视图（旧 panel-memory DOM 原样挪入） -->
+    <div class="view func" id="view-memory">
+      <div id="panel-memory">
+        <div class="panel-toolbar">
+          <span class="panel-title">团队记忆</span>
+          <button data-action="loadMemory">刷新</button>
+        </div>
+        <div id="memoryHtml" class="memory-box"></div>
+        <div class="memory-block" style="margin-top:12px;">
+          <div class="memory-block-title">历史挖掘（术语 / 称呼 / 遗漏任务）</div>
+          <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+            <select id="mineConv" style="flex:2;min-width:140px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--cardbg);"></select>
+            <input id="mineLimit" type="number" value="500" min="1" max="2000"
+              style="width:76px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--cardbg);">
+            <button class="primary" data-action="runMining">跑挖掘</button>
+          </div>
+          <div id="mineCands" class="memory-box" style="padding:0;"></div>
+        </div>
       </div>
-      <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
-        <select id="minutesConv" style="flex:2;min-width:140px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;"></select>
-        <input id="minutesLimit" type="number" value="50" min="1" max="500"
-          style="width:70px;padding:4px 8px;border:1px solid #d0d3d8;border-radius:6px;font-size:12px;">
-        <button class="primary" data-action="generateMinutes">生成纪要</button>
-      </div>
-      <div id="minutesList" class="memory-box"></div>
     </div>
+
+    <!-- 设置视图（新建占位） -->
+    <div class="view settings" id="view-settings">
+      <div class="set-card">
+        <h3>默认落地页</h3>
+        <label><input type="radio" name="setLanding" data-action="setLanding" value="chat" /> 聊天</label>
+        <label><input type="radio" name="setLanding" data-action="setLanding" value="task" /> 任务工作台</label>
+      </div>
+      <div class="set-card">
+        <h3>主题</h3>
+        <label><input type="radio" name="setThemeMode" data-action="setThemeMode" value="light" /> 浅色</label>
+        <label><input type="radio" name="setThemeMode" data-action="setThemeMode" value="dark" /> 深色</label>
+      </div>
+      <div class="set-card">
+        <h3>账号</h3>
+        <button class="danger-act" data-action="logout">退出登录</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -332,6 +244,6 @@
 </div>
 <div class="backend-status" id="sdkStatus" style="bottom:44px;font-weight:600;">SDK 状态：待初始化</div>
 
-<script src="app.js?v=2026090222"></script>
+<script src="app.js?v=2026090312"></script>
 </body>
 </html>
