@@ -8,7 +8,82 @@
 界面为 UI 骨架 v2：左侧导航七视图（聊天/任务工作台/审批/记忆/汇总/权限/设置）、AI 统一卡片语言、三态存在规则、浅深双主题、记忆页拟人化。
 团队成员分布不同区域也能用：主机 + 全员装 Tailscale（免费加密组网）即可，见[团队部署](#团队部署tailscale-跨区域)。
 
-## 架构一句话
+---
+
+## 一、快速上手（30 秒）
+
+1. 浏览器打开 `http://<主机地址>:8000`（内网用主机 IP；跨区域用 Tailscale 虚拟 IP，见[团队部署](#团队部署tailscale-跨区域)）
+2. 用管理员分配的账号密码登录
+3. 左侧进【聊天】，像平时说话一样安排一件事，比如：
+
+   > 李娜 明天上午10点前把测试报告发我
+
+4. AI 生成确认卡找你拍板 → 点【确认】→ 任务进看板，到点自动提醒负责人
+
+就这些——**安排任务不需要点任何界面，说话就行**。
+
+## 二、怎么用（按角色看）
+
+### 📌 我是组长：安排任务
+
+不用学任何操作，在聊天框里像平时说话一样：
+
+> 李娜 明天上午10点前把测试报告发我
+> 小张 周五前出季度数据报表
+> 这事还没人负责呢（→ AI 识别为待认领任务）
+
+AI 生成确认卡找你拍板（负责人/时间对不对），确认后任务进看板并自动开始提醒。说错了随时驳回或编辑。
+
+### 📌 我是成员：任务找上我了
+
+- 打开软件，左侧【任务】图标有**红色数字** = 有事等你拍板
+- 进【任务工作台】，最上面一排“需要你处理”就是找你的卡：【确认】/【驳回】（选原因）/【改负责人】
+- 处理完该干嘛干嘛；到截止前 AI 会自动提醒你（24h 前 / 当天 / 逾期标红）
+
+### 📌 活干完了
+
+两种方式随你：
+
+- 看板任务卡上点【完成】按钮
+- 或者直接在群里说“**我做完了**”——AI 听得懂，自动闭环
+
+### 📌 AI 认错人了
+
+- 驳回时选择原因（负责人错了/不需要建任务/时间不对/内容不对/其他）
+- 如果它叫错了人，在群里纠正：“应该是小张为”——**AI 会记住，下次不再犯**
+- 团队来了新人/新外号：在【记忆】页手动添加，或让 AI 在纠正中自己学
+
+### 📌 界面导览（左侧导航）
+
+| 视图 | 一句话 |
+|---|---|
+| 💬 聊天 | 说话和聊天的地方，任务从这里来；AI 助手置顶会话接收确认与提醒 |
+| 📋 任务 | 所有任务的全貌：待处理横排 + 四列看板（待指派/待确认/进行中/已完成），逾期标红置顶 |
+| ✅ 审批 | 高风险操作（如群发通知）的把关台 |
+| 🧠 记忆 | AI 认识谁、记住了什么术语、最近学了什么——每条可纠正，删除仅管理员 |
+| 📊 汇总 | 每日自动生成的团队动态 + 纪要 + 已取消/已驳回归档 |
+| 🔑 权限 | 谁是管理员、审计日志 |
+| ⚙️ 设置 | 默认落地页（聊天/任务）、浅深主题、退出登录 |
+
+### 📌 每日动线
+
+- **成员**：打开 → 看红点 → 处理待办 → 走人（30 秒）
+- **组长**：打开 → 工作台扫一眼逾期 → 【汇总】看昨日动态
+
+## 三、团队部署（Tailscale 跨区域）
+
+成员不在同一局域网时，主机与全员各装 [Tailscale](https://tailscale.com)（免费加密组网）并登录同一账号，
+浏览器访问主机虚拟 IP（如 `http://100.x.y.z:8000`）即可，数据端到端加密、零公网暴露。
+方案与风险详见 `docs/specs/团队分布式部署Tailscale-Spec.md`，同事接入三步见 `docs/同事接入说明书.md`。
+同一局域网内则直接访问主机内网 IP。完整方案与运维 SOP 见 `交接文档.md` 部署章节（本机文件）。
+
+账号由管理员用 `cd backend-ts && npx tsx scripts/set-password.mts <username> <password> [user_id]` 开通/重置。
+
+---
+
+## 四、技术部分
+
+### 架构一句话
 
 ```
 Electron 壳（托盘/系统通知/开机自启/后端子进程生命周期）
@@ -21,7 +96,7 @@ Hono/TS 后端单体（Zod 校验 · Drizzle 数据层 · scrypt 会话认证 ·
 聊天层为自建实现（2026-09-02 切流）：消息落库 → SSE fanout（携 DB id + client_msg_id 双去重键）→
 内联 AI 闸门（意图识别/归属判定/确认卡）。OpenIM 已退役并物理下线（2026-09-03，详见交接文档）。
 
-## 代码结构（npm workspaces monorepo）
+### 代码结构（npm workspaces monorepo）
 
 ```text
 im-ai-office/
@@ -29,7 +104,7 @@ im-ai-office/
 ├── backend-ts/                # TS 后端（Hono + Zod + Drizzle + pg + Vitest）
 │   ├── src/index.ts           # 入口（8000 端口，静态托管 web/ + 提醒调度）
 │   ├── src/app.ts             # 路由链式组装 + export type AppType（Hono RPC 契约）
-│   ├── src/pipeline.ts        # AI 编排：意图识别(Zod) → 归属判定 → 落库
+│   ├── src/pipeline.ts        # AI 编排：意图识别(Zod) → 归属判定（别名最长匹配）→ 落库
 │   ├── src/auth.ts            # scrypt 口令 + session token（30 天）
 │   ├── src/db/schema.ts       # Drizzle schema（16+ 表，生产库内省基线）
 │   ├── src/db.ts              # initSchema = drizzle migrate + 种子
@@ -39,7 +114,7 @@ im-ai-office/
 │   └── scripts/               # import-openim.mts（Mongo 一次性导入）/ set-password.mts（口令分发）
 ├── frontend-ts/               # 原生 TS 前端（esbuild 单文件打包到 web/）
 │   ├── src/api.ts             # API 层（hc<AppType> Hono RPC + Bearer 会话，无 @ts-nocheck）
-│   ├── src/app.ts             # UI 逻辑（导航七视图/工作台/卡片系统，tsc 0 错误）
+│   ├── src/app.ts             # UI 逻辑（导航七视图/任务工作台/卡片系统，tsc 0 错误）
 │   ├── src/__sentinel__/      # RPC 契约哨兵测试（拼错端点/方法 → 编译失败）
 │   └── static/                # index.html / styles.css 单一来源
 ├── electron/                  # Electron 桌面壳（2026-09-02 替代 Tauri）
@@ -47,17 +122,13 @@ im-ai-office/
 │   ├── src/backend.ts         # 后端子进程：spawn / 端口预检 / crash 退避 / taskkill 进程树
 │   └── release*/              # 安装包（IMAI Setup.exe，不入库）
 ├── web/                       # 后端静态目录（frontend-ts 构建产物）
-├── scripts/quality-report.mjs # 识别质量周报（/api/stats/quality 客户端）
+├── scripts/quality-report.mjs # 识别质量报告（含真实口径通过率/分源延迟，只读）
 └── docs/                      # 计划与 Spec（含《统一技术栈架构演进Spec.md》）
 ```
 
-## 快速开始
+### 开发快速开始
 
-### 1. 依赖
-
-- Node 22+（本机 26）、PostgreSQL 16（Windows 原生 `C:\imai\pgsql`，或任意 PG 实例）
-
-### 2. 安装与建表
+依赖：Node 22+、PostgreSQL 16（Windows 原生或任意 PG 实例）。
 
 ```bash
 npm install                # workspaces 一次装全
@@ -65,35 +136,17 @@ cd backend-ts
 npx drizzle-kit migrate    # 空库自动建全表（迁移由 journal 管理）
 ```
 
-### 3. 启动
-
 ```bash
-# 开发：后端
-npm run dev:backend        # 等价 cd backend-ts && npx tsx src/index.ts
-# 开发：前端（改动实时打包到 web/）
-npm run dev:frontend
-
-# 桌面端（推荐）：Electron 自动拉起后端
-npm run dev:electron
-# 打包 Windows 安装包
-cd electron && npx electron-builder --win
+npm run dev:backend        # 开发：后端（等价 cd backend-ts && npx tsx src/index.ts）
+npm run dev:frontend       # 开发：前端（改动实时打包到 web/）
+npm run dev:electron       # 桌面端（推荐）：Electron 自动拉起后端
+# 打包 Windows 安装包：cd electron && npx electron-builder --win
 ```
-
-浏览器模式：直接访问 `http://127.0.0.1:8000`（Electron 壳加载的就是同一页面）。
-
-### 团队部署（Tailscale 跨区域）
-
-成员不在同一局域网时，主机与全员各装 [Tailscale](https://tailscale.com)（免费加密组网）并登录同一账号，
-浏览器访问主机虚拟 IP（如 `http://100.x.y.z:8000`）即可，数据端到端加密、零公网暴露。
-方案与风险详见 `docs/specs/团队分布式部署Tailscale-Spec.md`，同事接入三步见 `docs/同事接入说明书.md`。
-完整方案（含局域网直连模式）见 `交接文档.md` 部署章节。
-
-### 4. 登录
 
 `/api/auth/login`（username + password → session token，30 天）。
 账号口令由管理员用 `cd backend-ts && npx tsx scripts/set-password.mts <username> <password> [user_id]` 分发。
 
-## 环境变量（仓库根 .env，永不提交）
+### 环境变量（仓库根 .env，永不提交）
 
 | env | 作用 |
 |---|---|
@@ -104,7 +157,7 @@ cd electron && npx electron-builder --win
 | `AUTH_TOKEN` | 已废弃（OpenIM 回调随 P3 切流下线） |
 | `OPENIM_API` / `OPENIM_SECRET` | 仅切流前使用，切流后可从 .env 移除 |
 
-## 测试
+### 测试
 
 ```bash
 cd backend-ts
@@ -117,12 +170,12 @@ node ../scripts/quality-report.mjs      # 识别质量报告（含真实口径�
 测试约定：E2E 文本用「房间号/编号」等自然尾缀保证唯一（避开 30 分钟确定性去重窗口）；
 数据标记 `张敏(e2e)` / `e2e-*`，跑完自动清理。
 
-## OpenIM（已退役）
+### OpenIM（已退役）
 
 2026-09-02 切流自建聊天层，OpenIM 不再参与任何链路；2026-09-03（Task 3.7）全部容器、镜像与数据卷已物理删除，Docker 不再是运行依赖。历史代码见
 git tag `python-backend-final`（Python 时代）与 `openim-era-final`（OpenIM 时代终态）。
 
-## 关键设计决策
+### 关键设计决策
 
 | 决策 | 原因 |
 |---|---|
@@ -134,4 +187,3 @@ git tag `python-backend-final`（Python 时代）与 `openim-era-final`（OpenIM
 | AI 三态规则 | 主动态（角标+卡片找人）/工作态（轻提示不弹窗）/静默态（隐形）——每个 AI 功能必须归属其一，防“为存在感而吵” |
 | 别名最长匹配优先 | 归属判定子串匹配时，长命中覆盖短别名（“小张为”不被短别名“小张”扩成多人歧义，G18） |
 | 静态资源 no-cache + 构建时间戳指纹 | 启发式磁盘缓存曾致 Electron 更新后仍跑旧 JS（SSE 自愈代码加载不到） |
-| esbuild 依赖全内联 | 后端 dist/index.js 单文件运行仅需 node，Electron 分发不打包 node_modules |
