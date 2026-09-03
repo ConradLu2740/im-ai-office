@@ -699,6 +699,7 @@ function toggleTheme() {
 }
 
 async function loadSummary() {
+  loadSummaryArchives(); // 归档区独立于汇总生成结果，并行刷新
   const box = document.getElementById("summaryBox");
   try {
     const data = await api("/api/summary/daily") as { text?: string };
@@ -708,6 +709,24 @@ async function loadSummary() {
   } catch (e) {
     box.innerHTML = `<div class='approval-empty'>生成失败：${esc((e as Error).message)}</div>`;
   }
+}
+
+// 汇总页：已取消 / 已驳回任务归档（折叠区，容器在 index.html #view-summary）
+async function loadSummaryArchives() {
+  const renderList = (el: HTMLElement | null, list: TaskRow[], errMsg: string) => {
+    if (!el) return;
+    el.innerHTML = errMsg
+      ? `<div style="color:#8f959e;font-size:12px;">${errMsg}</div>`
+      : (list.length
+        ? list.map(t => `<div class="memory-term">#${t.id} ${esc(t.content)} · 负责人：${esc(t.assignee || "—")} · ${esc(String(t.updated_at || t.created_at || "").slice(0, 10))}</div>`).join("")
+        : `<div style="color:#8f959e;font-size:12px;">暂无</div>`);
+  };
+  const [c, r] = await Promise.allSettled([
+    api("/api/tasks?status=cancelled") as Promise<{ tasks?: TaskRow[] }>,
+    api("/api/tasks?status=rejected") as Promise<{ tasks?: TaskRow[] }>,
+  ]);
+  renderList(document.getElementById("sumCancelled"), c.status === "fulfilled" ? (c.value.tasks || []) : [], c.status === "rejected" ? "加载失败" : "");
+  renderList(document.getElementById("sumRejected"), r.status === "fulfilled" ? (r.value.tasks || []) : [], r.status === "rejected" ? "加载失败" : "");
 }
 
 let _approvalStatus = "pending";
@@ -846,10 +865,26 @@ async function loadAudit() {
 async function loadMemory() {
   const box = document.getElementById("memoryHtml");
   try {
-    const data = await api("/api/memory") as { memory?: { terms?: Array<{ term: string; meaning: string | null; source?: string | null }>; grp_meta?: { intro?: string } | null } };
+    // 并行：记忆数据 + 当前用户角色（决定是否渲染删除按钮；请求失败按 member 处理）
+    const memP = api("/api/memory") as Promise<{ memory?: { terms?: Array<{ term: string; meaning: string | null; source?: string | null }>; grp_meta?: { intro?: string } | null } }>;
+    const roleP = (async (): Promise<string> => {
+      if (!currentUser) return "member";
+      try {
+        const r = await api(`/api/role/${encodeURIComponent(currentUser)}`) as { role?: string };
+        return r.role === "group_admin" ? "group_admin" : "member";
+      } catch (_) { return "member"; }
+    })();
+    const [data, role] = await Promise.all([memP, roleP]);
     const terms = data.memory?.terms || [];
     const gm = data.memory?.grp_meta;
-    let html = "";
+    const isAdmin = role === "group_admin";
+    let html = `<div class="memory-banner">🧠 团队记忆 · ${terms.length} 条术语${gm && gm.intro ? " · 已收录群简介" : ""}</div>`;
+    // 拟人化：最近学到（来源含 reject/correct/纠正 的最近 3 条，没有就不显示；后端纠正类 source 为 corrected）
+    const learned = terms.filter(t => /reject|correct|纠正/.test(t.source || "")).slice(-3);
+    if (learned.length) {
+      html += `<div class="memory-block"><div class="memory-block-title">最近学到</div>${learned.map(t =>
+        `<div class="memory-term">学到：<b>${esc(t.term)}</b> = ${esc(t.meaning)}</div>`).join("")}</div>`;
+    }
     // 迭代2 B3：手动新增术语入口
     html += `<div class="memory-block"><div class="memory-block-title">新增术语</div>
       <div class="ai-card-btns" style="flex-wrap:wrap;gap:6px;">
@@ -870,9 +905,9 @@ async function loadMemory() {
             <button class="primary" data-action="saveTermEdit" data-term="${escAttr(t.term)}">保存</button>
             <button data-action="abortTermEdit">放弃</button></div>`;
         }
+        const delBtn = isAdmin ? `<button class="danger" data-action="deleteTerm" data-term="${escAttr(t.term)}" style="margin-left:2px;">🗑</button>` : "";
         return `<div class="memory-term"><b>${esc(t.term)}</b> = ${esc(t.meaning)} <span style="color:#8f959e;font-size:11px;">[${esc(t.source)}]</span>
-          <button data-action="editTerm" data-term="${escAttr(t.term)}" style="margin-left:6px;">✎</button>
-          <button class="danger" data-action="deleteTerm" data-term="${escAttr(t.term)}" style="margin-left:2px;">🗑</button></div>`;
+          <button data-action="editTerm" data-term="${escAttr(t.term)}" style="margin-left:6px;">✎</button>${delBtn}</div>`;
       }).join("");
     } else {
       html += `<div style="color:#8f959e;font-size:12px;">暂无记忆，驳回/纠正会沉淀</div>`;

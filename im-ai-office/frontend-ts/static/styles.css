@@ -166,6 +166,10 @@ input, textarea, select { font-family:inherit; color:var(--text); }
 
 /* 记忆 */
 .memory-block { margin-bottom:16px; }
+.memory-banner { font-size:13px; font-weight:600; color:#fff; background:linear-gradient(135deg, #7b5cff 0%, #4f8cff 100%); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
+.sum-archive { margin-top:14px; border:1px solid var(--border); border-radius:10px; padding:10px 14px; background:var(--cardbg); }
+.sum-archive summary { font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; }
+.sum-archive-block { margin-top:10px; }
 .memory-block-title { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:8px; }
 .memory-term { font-size:13px; color:var(--text); margin-bottom:6px; }
 .memory-term b { color:var(--ok); }
