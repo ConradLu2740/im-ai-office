@@ -68,6 +68,8 @@ export async function initSchema(): Promise<void> {
 
 /** 测试基座：清空全部业务表 + 重建种子（对齐 conftest.fresh_db）。 */
 export async function wipeAndSeed(): Promise<void> {
+  // CI / 全新 imai_test 空库：先跑迁移建表（已对齐库 no-op），否则 DELETE 会因表不存在而炸
+  await initSchema();
   const tables = ["mine_candidate", "minutes", "digest_sent", "reminder_sent", "event_dedup",
     "user_last_read", "group_member", "user_group", "session", "app_user",
     "grp_meta", "term", "approval", "role", "message", "ai_dm", "audit", "task", "alias", "person"];
