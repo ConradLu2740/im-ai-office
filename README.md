@@ -2,6 +2,7 @@
 
 # IMAI 办公助手 · 对话即工作台，AI 即员工
 
+![CI](https://github.com/ConradLu2740/im-ai-office/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-PolyForm--NC%201.0.0-red)
 ![Backend](https://img.shields.io/badge/backend-TypeScript%20%2F%20Hono-blue)
 ![Data](https://img.shields.io/badge/ORM-Drizzle-green)
@@ -30,6 +31,10 @@
 负责人点「完成」或群里说"做完了" → 看板同步
 AI 全程留痕，关键动作必须人审
 ```
+
+| 群聊 AI 旁听 → 任务确认卡 → 看板 | Electron 桌面端 |
+|---|---|
+| ![群聊 AI 旁听与任务确认](docs/screenshots/ai-confirm-kanban.png) | ![Electron 桌面端](docs/screenshots/app-chat.png) |
 
 **核心能力**：群消息 AI 任务识别 · 歧义私聊消歧（三个"小张"指谁？）· 看板与逾期标红 · 三档到期提醒 · 完成闭环（按钮 + 口头"做完了"）· 团队记忆（术语/称谓注入识别）· RBAC 权限与全程审计。
 
@@ -64,6 +69,12 @@ PostgreSQL（业务 + 聊天，唯一数据库）
 
 三条设计底线：**AI 不擅自执行**（确认/驳回人审兜底）、**消息不丢不重**（唯一约束幂等 + 双去重键 + 断线全量刷新兜底）、**数据不出域**（全在自己数据库里）。
 
+### 参与贡献
+
+- 🗺️ [ROADMAP](ROADMAP.md) — 看看接下来做什么，欢迎 Issue 讨论 priority
+- 🤝 [CONTRIBUTING](.github/CONTRIBUTING.md) — 开发环境搭建、Spec 先行约定与 PR 流程
+- 🐞 [提 Issue](https://github.com/ConradLu2740/im-ai-office/issues/new/choose) — Bug 报告与功能建议模板
+
 ### License
 
 本项目采用 [PolyForm Noncommercial 1.0.0](LICENSE) 协议开源：
@@ -90,6 +101,10 @@ Confirmed → task lands on the kanban, assignee notified → due-date reminders
 Assignee clicks "done" or says "done!" in chat → board syncs
 Every AI action is audited; critical actions require human approval
 ```
+
+| AI task extraction → confirmation → kanban | Electron desktop app |
+|---|---|
+| ![AI task extraction and confirmation](docs/screenshots/ai-confirm-kanban.png) | ![Electron desktop app](docs/screenshots/app-chat.png) |
 
 **Key capabilities:** AI task extraction from group messages · ambiguity resolution via AI DM · kanban with overdue alerts · tiered reminders (24h / due-day / overdue) · completion loop (button or natural-language "done!") · team memory (terms & nicknames injected into recognition) · RBAC with full audit trail.
 
@@ -123,6 +138,12 @@ PostgreSQL (business + chat, single database)
 ```
 
 Three design principles: **AI never acts on its own** (confirmation / rejection always human-approved), **no message lost or duplicated** (unique-constraint idempotency + dual dedup keys + full refresh on reconnect), **data stays in-house** (everything in your own database).
+
+### Get Involved
+
+- 🗺️ [ROADMAP](ROADMAP.md) — see what's next; Issues welcome
+- 🤝 [CONTRIBUTING](.github/CONTRIBUTING.md) — dev setup, spec-first workflow, PR guide
+- 🐞 [Open an issue](https://github.com/ConradLu2740/im-ai-office/issues/new/choose)
 
 ### License
 
