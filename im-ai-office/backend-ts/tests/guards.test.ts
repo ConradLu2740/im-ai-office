@@ -184,4 +184,23 @@ describe("G13 · 质量统计口径（真实口径排除派生/测试流量）",
     expect(sdk!.p95_ms).toBeGreaterThan(50000);
   });
 });
+describe("G14 · 驳回原因选择器", () => {
+  it("reject 透传预设原因到审计；非指派类原因不触发人称沉淀", async () => {
+    makeFakeLlm([{ match: "我来交周报", intent: makeIntent({ is_task: true, confidence: "high",
+      content: "交周报", assignee_hint: "我", deadline_hint: "周五前", assign_mode: "self" }) }]);
+    const token = await mkSession("user001");
+    const ai = await post("/api/messages/send", { text: "我来交周报",
+      conv_id: "sg_g14", client_msg_id: "g14-cmid-1" }, token);
+    const taskId = ((ai.ai as Record<string, unknown>).task as Record<string, unknown>).taskId as number;
+    const r = await post(`/api/tasks/${taskId}/reject`, { reason: "时间不对" });
+    expect(r.ok).toBe(true);
+    expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("rejected");
+    const aud = await one<{ detail: string }>(
+      "SELECT detail FROM audit WHERE action='reject' AND detail::jsonb->>'taskId'=$1 ORDER BY id DESC LIMIT 1", [taskId]);
+    expect(JSON.parse(aud!.detail).reason).toBe("时间不对");
+    // “时间不对”不含指派信号 → 不应沉淀人称记忆
+    const mem = await query("SELECT id FROM term WHERE term LIKE '人称:%' AND meaning LIKE '%任务#" + taskId + "%'");
+    expect(mem.length).toBe(0);
+  });
+});
 void pool;

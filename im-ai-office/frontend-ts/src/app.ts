@@ -472,6 +472,8 @@ async function sendMsg() {
 
 // ============ 看板 ============
 let editingTaskId: number | null = null; // 迭代2 B1：正在内联编辑的任务 id
+let _rejectingTaskId: number | null = null; // 驳回原因选择：正在选原因的任务 id
+const REJECT_REASONS = ["负责人错了", "不需要建任务", "时间不对", "内容不对", "其他"] as const;
 
 function parseDeadlineAt(v: string | null | undefined) {
   if (!v) return null;
@@ -509,6 +511,16 @@ function renderTaskCard(t: TaskRow) {
     <button data-action="editTask" data-task-id="${t.id}">编辑</button>
     <button class="danger" data-action="cancelTask" data-task-id="${t.id}">取消任务</button>
   </div>` : "";
+  const pendingBtns = _rejectingTaskId === t.id
+    ? `<div class="ai-card-btns" style="margin-top:10px;flex-wrap:wrap;gap:6px;">
+        <span style="font-size:11px;color:#8f959e;align-self:center;">驳回原因：</span>
+        ${REJECT_REASONS.map((r) => `<button class="danger" data-action="rejectTaskReason" data-task-id="${t.id}" data-reason="${escAttr(r)}">${esc(r)}</button>`).join("")}
+        <button data-action="abortReject">取消</button>
+      </div>`
+    : `<div class="ai-card-btns" style="margin-top:10px;">
+        <button class="primary" data-action="confirmTask" data-task-id="${t.id}">确认</button>
+        <button class="danger" data-action="rejectTask" data-task-id="${t.id}">驳回</button>
+      </div>`;
   const doneBadge = isDone ? `<span style="color:#1a9e6c;font-weight:600;">✅ 已完成</span> · ` : "";
   return `
     <div class="task-card${isOverdue ? " overdue" : ""}">
@@ -521,10 +533,7 @@ function renderTaskCard(t: TaskRow) {
         ${t.confidence ? `<span class="tag ${confCls[t.confidence]||'tag-low'}">${t.confidence}</span>` : ""}
       </div>
       ${proofs.length ? `<div class="task-proof">依据：${esc(proofs.join("；"))}</div>` : ""}
-      ${isPending ? `<div class="ai-card-btns" style="margin-top:10px;">
-        <button class="primary" data-action="confirmTask" data-task-id="${t.id}">确认</button>
-        <button class="danger" data-action="rejectTask" data-task-id="${t.id}">驳回</button>
-      </div>` : ""}
+      ${isPending ? pendingBtns : ""}
       ${confirmedBtns}
       ${editHtml}
     </div>
@@ -536,8 +545,9 @@ async function confirmTask(id: number) {
   loadTasks();
 }
 
-async function rejectTask(id: number) {
-  await api(`/api/tasks/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "负责人错了" }) });
+async function rejectTask(id: number, reason: string) {
+  await api(`/api/tasks/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
+  _rejectingTaskId = null;
   loadTasks();
 }
 
@@ -1153,8 +1163,10 @@ function _dispatchAction(el: HTMLElement) {
     case "runDiagnose": runDiagnose(); break;
     case "selectAISession": selectAISession(); break;
     case "selectConversation": selectConversation(d.convId, d.targetId, d.name, Number(d.type), el); break;
-    case "confirmTask": confirmTask(Number(d.taskId)); break;
-    case "rejectTask": rejectTask(Number(d.taskId)); break;
+    case "confirmTask": _rejectingTaskId = null; confirmTask(Number(d.taskId)); break;
+    case "rejectTask": _rejectingTaskId = Number(d.taskId); loadTasks(); break;
+    case "rejectTaskReason": rejectTask(Number(d.taskId), d.reason || "其他"); break;
+    case "abortReject": _rejectingTaskId = null; loadTasks(); break;
     case "editTask": editingTaskId = Number(d.taskId); loadTasks(); break;
     case "abortEdit": editingTaskId = null; loadTasks(); break;
     case "saveTaskEdit": saveTaskEdit(Number(d.taskId)); break;
