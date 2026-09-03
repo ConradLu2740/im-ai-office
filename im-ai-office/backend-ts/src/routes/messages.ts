@@ -111,14 +111,20 @@ export const messagesRoutes = new Hono()
     return c.json({ ok: true, messages: rows });
   })
 
-  // 未读计数：各会话水位之后的消息数
+  // 未读计数：以 user_group（与 /api/conversations 同源）为主表，LEFT JOIN 该用户水位；
+  // 无水位行的群（从未打开）也计入，未读 = 整群消息数（G17）
   .get("/api/messages/unread", async (c) => {
     const user = await requireUser(c);
     if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+    const convExpr = sql<string>`'sg_' || ${userGroup.groupId}`;
     const rows = await db.select({
-      conv_id: userLastRead.convId,
-      unread: sql<number>`(SELECT COUNT(*)::int FROM ${message} m WHERE m.conv_id = ${userLastRead.convId} AND m.id > COALESCE(${userLastRead.lastMsgId}, 0))`,
-    }).from(userLastRead).where(eq(userLastRead.userId, user.id));
+      conv_id: convExpr,
+      unread: sql<number>`(SELECT COUNT(*)::int FROM ${message} m WHERE m.conv_id = ${convExpr} AND m.id > COALESCE(${userLastRead.lastMsgId}, 0))`,
+    }).from(userGroup)
+      .leftJoin(userLastRead, and(
+        eq(userLastRead.convId, convExpr),
+        eq(userLastRead.userId, user.id),
+      ));
     return c.json({ ok: true, unread: rows });
   });
 

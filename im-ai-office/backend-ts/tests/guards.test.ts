@@ -275,4 +275,29 @@ describe("G16 术语接口鉴权", () => {
     expect(rDelAdmin.ok).toBe(true);
   });
 });
+describe("G17 · 未读数覆盖无水位群（角标系统）", () => {
+  it("从未打开的群也出现在 unread 中；水位语义回归保护", async () => {
+    const token = await mkSession("user017", "G17用户");
+    // 直插两个群（conversations 同源表：user_group）+ 消息
+    await query("INSERT INTO user_group(group_id, name) VALUES('g17a','G17群A'),('g17b','G17群B') ON CONFLICT (group_id) DO NOTHING");
+    await query("DELETE FROM message WHERE conv_id IN ('sg_g17a','sg_g17b')");
+    await query("INSERT INTO message(conv_id, sender_id, sender_name, content, client_msg_id) VALUES('sg_g17a','user017','G17用户','甲','g17a-1'),('sg_g17a','user017','G17用户','乙','g17a-2'),('sg_g17b','user017','G17用户','丙','g17b-1'),('sg_g17b','user017','G17用户','丁','g17b-2')");
+    // 清掉可能干扰的旧水位
+    await query("DELETE FROM user_last_read WHERE user_id='user017' AND conv_id IN ('sg_g17a','sg_g17b')");
+    const ids = await query<{ id: number; conv_id: string }>("SELECT id, conv_id FROM message WHERE conv_id='sg_g17b' ORDER BY id");
+    // 对照组：g17b 设水位 = 第一条消息 id → 只剩 1 条未读
+    await query("INSERT INTO user_last_read(user_id, conv_id, last_msg_id) VALUES('user017','sg_g17b',$1)", [ids[0].id]);
+
+    const { app } = await import("../src/app.js");
+    const res = await app.request("/api/messages/unread", { headers: { Authorization: `Bearer ${token}` } });
+    const r = (await res.json()) as { ok: boolean; unread: Array<{ conv_id: string; unread: number }> };
+    expect(r.ok).toBe(true);
+    const a = r.unread.find((x) => x.conv_id === "sg_g17a");
+    expect(a).toBeDefined();
+    expect(a!.unread).toBe(2); // 无水位 → 整群未读（现状 FAIL 点）
+    const b = r.unread.find((x) => x.conv_id === "sg_g17b");
+    expect(b!.unread).toBe(1); // 水位语义回归保护
+  });
+});
+
 void pool;
