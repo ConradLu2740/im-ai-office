@@ -31,6 +31,12 @@ export const app = new Hono()
   .route("/", authRoutes)
   .route("/", messagesRoutes)
   // 静态前端（web/ 目录；API 路由优先于静态）
+  // no-cache：html/js 每次协商缓存（304），杜绝 Electron/浏览器启发式缓存吃掉新版前端
+  // （2026-09-03 实证：无缓存头时 Electron 磁盘缓存导致更新后仍跑旧 JS）
+  .use("*", async (c, next) => {
+    if (!c.req.path.startsWith("/api/")) c.header("Cache-Control", "no-cache");
+    await next();
+  })
   .use("*", serveStatic({ root: "../web", rewriteRequestPath: (p) => p }))
   .get("/", serveStatic({ path: "../web/index.html" }));
 
