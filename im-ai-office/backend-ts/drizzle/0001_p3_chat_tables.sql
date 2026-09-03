@@ -36,4 +36,4 @@ CREATE TABLE "user_last_read" (
 --> statement-breakpoint
 ALTER TABLE "group_member" ADD CONSTRAINT "group_member_user_id_app_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."app_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_app_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."app_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "uq_message_conv_client_msg" ON "message" USING btree ("conv_id","client_msg_id");
+-- message 唯一索引已移入 0002_p0_baseline_tables（message 表由 0002 建表，索引不能先于表存在）
