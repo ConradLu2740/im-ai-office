@@ -1,13 +1,13 @@
 # IMAI · 工作流缺口登记 + G1/G3/G4 修复 Spec（2026-09-02）
 
-> 背景：架构合理性深度走查（2026-09-02）发现六个工作流缺口，均有代码实证。本 Spec 登记 G1-G6 并落地 G1/G3/G4 三个小项；G2（对账机制）单独立项，G5/G6 登记观察。
+> 背景：架构合理性深度走查（2026-09-02）发现六个工作流缺口，均有代码实证。本 Spec 登记 G1-G6 并落地 G1/G3/G4 三个小项；G2（对账机制）**已随 P3 切流关闭（2026-09-03）**，G5/G6 登记观察。
 
 ## 0. 缺口登记总表
 
 | # | 缺口 | 实证 | 严重度 | 处置 |
 |---|---|---|---|---|
 | G1 | 任务无"完成"终态 → confirmed 任务逾期提醒永动（提醒文案让用户"更新状态"，但没有更新路径） | 全库 done/completed 零命中；reminder 扫描 `status='confirmed' 且过期 → overdue` | 高（伤信任，验收线"完成会同步看板"未落地） | **本 Spec 修复** |
-| G2 | 回调单入口无对账——webhook 一次性推送，后端停机期间消息永久缺失 | handle_openim_callback 无补拉机制 | 高（可靠性） | **单独立项**（OpenIM REST 对账） |
+| G2 | ~~回调单入口无对账~~ **已关闭（2026-09-03）**：回调入口（handle_openim_callback）随 P3 切流物理删除，对账对象不复存在；现行唯一入口 /api/messages/send 同步内联落库（唯一约束幂等），无停机补拉需求 | ~~handle_openim_callback 无补拉机制~~ 入口已删 | ~~高（可靠性）~~ 不再适用 | **已关闭**（切流后单入口同步写库，无对账场景） |
 | G3 | `/openim/send_message` 无鉴权且 user_id 可伪造；且全 API 面无凭证（前端 api() 不带凭证，实测） | routes_openim send 无 check；deps 哲学=env 未设置即放行 | 中（内网姿态） | **本 Spec 缓解**（审计留痕+登记姿态），统一鉴权另立 |
 | G4 | deadline 解析失败静默（提醒调度 Spec §1.2 承诺的 `deadline_unparsed` 审计未实现） | 全库无 deadline_unparsed | 中（观测盲区→哑弹截止） | **本 Spec 修复** |
 | G5 | sync/async 双脑：每个入口 if 分叉，行为对齐靠自觉（worker 已核对走同一 actions） | routes 各入口 if config.AI_MODE | 低（维护税） | 观察；观察期后决定删 async |

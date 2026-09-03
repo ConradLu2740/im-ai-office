@@ -147,4 +147,41 @@ describe("G3 · RBAC 与确认流", () => {
     expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("confirmed");
   });
 });
+describe("G13 · 质量统计口径（真实口径排除派生/测试流量）", () => {
+  it("core 通过率排除 mine#/minutes# 派生任务；延迟按来源拆分", async () => {
+    // 造两类任务：真实任务 + 挖掘派生任务，各配一对 confirm/reject 审计
+    const real = await one<{ id: string }>(
+      "INSERT INTO task(content,creator,assignee,status,confidence) VALUES('真实任务','张伟','张伟','confirmed','high') RETURNING id");
+    const mined = await one<{ id: string }>(
+      "INSERT INTO task(content,creator,assignee,status,confidence) VALUES('挖掘候选','mine#1','张伟','rejected','medium') RETURNING id");
+    await query("INSERT INTO audit(actor,action,detail,ts) VALUES('g13','confirm',$1,NOW())", [JSON.stringify({ taskId: Number(real!.id) })]);
+    await query("INSERT INTO audit(actor,action,detail,ts) VALUES('g13','reject',$1,NOW())", [JSON.stringify({ taskId: Number(mined!.id), reason: "负责人错了" })]);
+    await query("INSERT INTO audit(actor,action,detail,ts) VALUES('g13','ai_processed',$1,NOW())",
+      [JSON.stringify({ msgId: "g13-1", action: "task_created", taskId: Number(real!.id), latency_ms: 1500, source: "send_endpoint" })]);
+    await query("INSERT INTO audit(actor,action,detail,ts) VALUES('g13','ai_processed',$1,NOW())",
+      [JSON.stringify({ msgId: "g13-2", action: "task_created", taskId: Number(mined!.id), latency_ms: 60000, source: "sdk_message" })]);
+
+    const rep = await get("/api/stats/quality?days=7");
+    expect(rep.ok).toBe(true);
+    // auditLog 必须写 ts（漏写 → 新行被统计窗口静默过滤，2026-09-03 实证）
+    const { auditLog } = await import("../src/repos.js");
+    await auditLog("g13", "ts_probe", { probe: true });
+    const probe = await one<{ ts: string | null }>("SELECT ts FROM audit WHERE actor='g13' AND action='ts_probe' ORDER BY id DESC LIMIT 1");
+    expect(probe!.ts).not.toBeNull();
+    const core = rep.core as { confirm: number; reject: number; one_pass_rate: number };
+    // 真实口径：挖掘派生任务的 reject 被排除 → 只剩 1 confirm / 0 reject
+    expect(core.confirm).toBe(1);
+    expect(core.reject).toBe(0);
+    expect(core.one_pass_rate).toBe(1);
+    // 全量口径不受影响（含挖掘 reject）
+    expect((rep.totals as Record<string, number>).reject).toBeGreaterThanOrEqual(1);
+    // 延迟分源：send_endpoint 不被 sdk_message 的 60s 样本污染
+    const bySrc = rep.latency_by_source as Array<{ source: string; n: number; p95_ms: number }>;
+    const send = bySrc.find((s) => s.source === "send_endpoint");
+    const sdk = bySrc.find((s) => s.source === "sdk_message");
+    expect(send?.n).toBeGreaterThanOrEqual(1);
+    expect(send!.p95_ms).toBeLessThan(10000);
+    expect(sdk!.p95_ms).toBeGreaterThan(50000);
+  });
+});
 void pool;
