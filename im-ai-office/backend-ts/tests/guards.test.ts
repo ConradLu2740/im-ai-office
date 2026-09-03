@@ -3,6 +3,7 @@ import { pool } from "./setup.js";
 import "./setup.js";
 import { makeFakeLlm, makeIntent } from "./setup.js";
 import { query, one } from "../src/db.js";
+import { resolve } from "../src/pipeline.js";
 
 // G 系关键守卫移植（test_g11/g12/g3/g4 精选）：TS 后端的核心不变量
 // P3：发送入口改为 /api/messages/send（内联 AI 闸门），/callback 与 /openim/* 已删除
@@ -300,4 +301,25 @@ describe("G17 · 未读数覆盖无水位群（角标系统）", () => {
   });
 });
 
+describe("G18 · 别名最长匹配优先", () => {
+  it("消息含『小张为』时命中长别名（1 人），不被短别名『小张』扩成多人歧义", async () => {
+    // 人员：张伟+张敏共享短别名“小张”；小张为 注册长别名“小张为”
+    const ids: Record<string, number> = {};
+    for (const name of ["G18张伟", "G18张敏", "G18小张为"]) {
+      ids[name] = Number((await one("INSERT INTO person (real_name) VALUES ($1) RETURNING id", [name]))!.id);
+    }
+    await query("INSERT INTO alias (person_id, name, source) VALUES ($1,'G18小张','registered'), ($2,'G18小张为','registered')", [ids["G18张伟"], ids["G18小张为"]]);
+    await query("INSERT INTO alias (person_id, name, source) VALUES ($1,'G18小张','registered')", [ids["G18张敏"]]);
+
+    // 消息含长别名：只命中小张为，不扩歧义
+    const r = await resolve("G18小张为 下午写个报告", "李娜(娜姐)", { assign_mode: "third_party" });
+    expect(r.ambiguous).toBe(false);
+    expect(r.candidates.length).toBe(1);
+    expect(r.candidates[0].real_name).toBe("G18小张为");
+    // 消息只含短别名：仍正常歧义分流
+    const r2 = await resolve("G18小张 下午写个报告", "李娜(娜姐)", { assign_mode: "third_party" });
+    expect(r2.ambiguous).toBe(true);
+    expect(r2.candidates.length).toBe(2);
+  });
+});
 void pool;
