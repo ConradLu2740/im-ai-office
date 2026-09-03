@@ -303,6 +303,11 @@ describe("G17 · 未读数覆盖无水位群（角标系统）", () => {
 
 describe("G18 · 别名最长匹配优先", () => {
   it("消息含『小张为』时命中长别名（1 人），不被短别名『小张』扩成多人歧义", async () => {
+    // 序列校准（测试库导入过数据，序列可能错位）+ 幂等清理
+    await query("SELECT setval('person_id_seq', (SELECT COALESCE(max(id),0) FROM person))");
+    await query("SELECT setval('alias_id_seq', (SELECT COALESCE(max(id),0) FROM alias))");
+    await query("DELETE FROM alias WHERE name LIKE 'G18%'");
+    await query("DELETE FROM person WHERE real_name LIKE 'G18%'");
     // 人员：张伟+张敏共享短别名“小张”；小张为 注册长别名“小张为”
     const ids: Record<string, number> = {};
     for (const name of ["G18张伟", "G18张敏", "G18小张为"]) {
