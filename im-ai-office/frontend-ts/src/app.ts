@@ -1222,6 +1222,7 @@ function renderAICard(r: AiCardResult) {
 let esAI: EventSource | null = null;
 let _lastReconnectRefresh = 0;
 let _sseRetryMs = 0;
+let _sseDiagTimer: number | null = null;
 function initSSE() {
   if (!window.EventSource || esAI) return;
   try {
@@ -1229,6 +1230,7 @@ function initSSE() {
     esAI.onopen = () => {
       setSDKStatus("实时通道已连接", true);
       _sseRetryMs = 0;
+      if (_sseDiagTimer) { clearTimeout(_sseDiagTimer); _sseDiagTimer = null; }
       // 断线重连/首连：全量刷新兔丢帧（离线消息靠 DB，历史是唯一渲染权威）
       const now = Date.now();
       if (now - _lastReconnectRefresh > 5000) {
@@ -1278,7 +1280,8 @@ function initSSE() {
     // 断线重连增强：网络错误时 EventSource 通常自动重连，但后端重启等场景可能进入
     // CLOSED（readyState=2）永久停止——主动重建（指数退避，2026-09-03 实证）
     esAI.onerror = () => {
-      setSDKStatus("实时通道重连中…", false);
+      setSDKStatus("实时通道重连中…(rs=" + esAI.readyState + ")", false);
+      if (_sseDiagTimer) { clearTimeout(_sseDiagTimer); _sseDiagTimer = null; }
       if (esAI && esAI.readyState === 2) {
         esAI.close();
         esAI = null;
@@ -1286,6 +1289,13 @@ function initSSE() {
         setTimeout(initSSE, _sseRetryMs);
       }
     };
+    // 诊断：5s 后仍未连上，在状态文本中暴露 EventSource.readyState
+    //（0=CONNECTING 服务端无响应/被拦截；2=CLOSED 已永久关闭）
+    _sseDiagTimer = window.setTimeout(() => {
+      if (esAI && esAI.readyState === 0) setSDKStatus("实时通道连接中…(rs=0，请截图反馈)", false);
+      else if (esAI && esAI.readyState === 2) setSDKStatus("实时通道已断开(rs=2，重连中)", false);
+      _sseDiagTimer = null;
+    }, 5000);
   } catch (_) { esAI = null; }
 }
 
