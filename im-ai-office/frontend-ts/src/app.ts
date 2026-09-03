@@ -751,6 +751,12 @@ function go(view: string) {
   });
   const t = document.getElementById("viewTitle");
   if (t) t.textContent = VIEW_TITLES[view] || view;
+  // 进入视图时自动加载数据（旧版 showPanel 行为平移，避免切页后空屏）
+  if (view === "memory") loadMemory();
+  else if (view === "approval") loadApprovals();
+  else if (view === "rbac") loadRbac();
+  else if (view === "summary") { loadSummary(); loadMinutes(); }
+  else if (view === "task") loadTasks();
 }
 
 function applyTheme(mode?: string) {
