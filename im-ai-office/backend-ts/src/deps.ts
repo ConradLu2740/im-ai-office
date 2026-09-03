@@ -1,5 +1,13 @@
 import { config, warnOnce } from "./config.js";
+import { sessionUser, type SessionUser } from "./auth.js";
 import type { Context } from "hono";
+
+/** 会话鉴权：Authorization: Bearer 或 x-imai-token header，无效返回 null */
+export async function requireUser(c: Context): Promise<SessionUser | null> {
+  const header = c.req.header("Authorization");
+  const alt = c.req.header("x-imai-token");
+  return sessionUser(header?.startsWith("Bearer ") ? header.slice(7).trim() : alt ?? null);
+}
 
 // ============ 认证依赖（deps.py 的 TS 版；兼容铁律：env 未设置=放行+一次性 WARN） ============
 

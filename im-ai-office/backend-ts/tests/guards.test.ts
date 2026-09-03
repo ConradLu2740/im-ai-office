@@ -241,4 +241,38 @@ describe("G15 · 任务状态变化补发 task_status SSE 事件", () => {
     } finally { unsubscribe(sink); }
   });
 });
+describe("G16 术语接口鉴权", () => {
+  it("PATCH/DELETE 需登录；DELETE 仅 group_admin", async () => {
+    const enc = encodeURIComponent;
+    // 1. 直插术语（term 表：term/meaning/source，grp_id/creator_id 可空，created_at 默认）
+    await query("INSERT INTO term(term, meaning, source) VALUES('G16术语','旧义','manual')");
+    // 2. 无 token PATCH → 401
+    const rPatchNoAuth = await request(`/api/term/${enc("G16术语")}`, "PATCH", { meaning: "新义" });
+    expect(rPatchNoAuth.ok).toBe(false);
+    expect(rPatchNoAuth.error).toBe("unauthorized");
+    // 3. 无 token DELETE → 401
+    const rDelNoAuth = await request(`/api/term/${enc("G16术语")}`, "DELETE");
+    expect(rDelNoAuth.ok).toBe(false);
+    expect(rDelNoAuth.error).toBe("unauthorized");
+    // 4. member PATCH → ok 且 meaning 更新
+    const user001 = await mkSession("user001", "G16管理员");
+    const rPatchMember = await request(`/api/term/${enc("G16术语")}`, "PATCH", { meaning: "G16新义" }, user001);
+    expect(rPatchMember.ok).toBe(true);
+    const row = await one<{ meaning: string }>("SELECT meaning FROM term WHERE term='G16术语'");
+    expect(row?.meaning).toBe("G16新义");
+    // 5. member DELETE → 403
+    const rDelMember = await request(`/api/term/${enc("G16术语")}`, "DELETE", undefined, user001);
+    expect(rDelMember.ok).toBe(false);
+    expect(rDelMember.error).toBe("forbidden");
+    // 6. user002（member）DELETE 403；user001 升 group_admin 后 DELETE ok
+    const user002 = await mkSession("user002", "G16成员");
+    await query("INSERT INTO term(term, meaning, source) VALUES('G16术语B','旧义B','manual')");
+    const rDelUser002 = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user002);
+    expect(rDelUser002.ok).toBe(false);
+    expect(rDelUser002.error).toBe("forbidden");
+    await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" });
+    const rDelAdmin = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user001);
+    expect(rDelAdmin.ok).toBe(true);
+  });
+});
 void pool;
