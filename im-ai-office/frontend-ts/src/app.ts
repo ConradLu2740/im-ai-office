@@ -210,7 +210,7 @@ function setSDKStatus(text: string, ok: boolean) {
 async function initSDK(userID: string, token: string) {
   // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供（initSSE），
   // 会话列表走后端 REST（loadConversations）。此函数仅保留入口语义。
-  setSDKStatus("IM 连接中...", false);
+  setSDKStatus("实时通道连接中…", false);
   loadConversations();
   startSelfHeal();
 }
@@ -1219,12 +1219,14 @@ function renderAICard(r: AiCardResult) {
 // 实时事件（网关收敛后：SSE 是唯一实时通道，消息/任务/卡片都走这里）
 let esAI: EventSource | null = null;
 let _lastReconnectRefresh = 0;
+let _sseRetryMs = 0;
 function initSSE() {
   if (!window.EventSource || esAI) return;
   try {
     esAI = new EventSource(API_BASE + "/api/events/stream");
     esAI.onopen = () => {
-      setSDKStatus("IM 已连接 ✅", true);
+      setSDKStatus("实时通道已连接", true);
+      _sseRetryMs = 0;
       // 断线重连/首连：全量刷新兔丢帧（离线消息靠 DB，历史是唯一渲染权威）
       const now = Date.now();
       if (now - _lastReconnectRefresh > 5000) {
@@ -1271,7 +1273,17 @@ function initSSE() {
         if (ev.type === "task_created" || ev.type === "ai.card") updateAIUnread();
       } catch (_) {}
     };
-    // EventSource 断线自动重连；无需手动重建
+    // 断线重连增强：网络错误时 EventSource 通常自动重连，但后端重启等场景可能进入
+    // CLOSED（readyState=2）永久停止——主动重建（指数退避，2026-09-03 实证）
+    esAI.onerror = () => {
+      setSDKStatus("实时通道重连中…", false);
+      if (esAI && esAI.readyState === 2) {
+        esAI.close();
+        esAI = null;
+        _sseRetryMs = _sseRetryMs ? Math.min(_sseRetryMs * 2, 30000) : 2000;
+        setTimeout(initSSE, _sseRetryMs);
+      }
+    };
   } catch (_) { esAI = null; }
 }
 
