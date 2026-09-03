@@ -13,7 +13,7 @@ Hono/TS 后端单体（Zod 校验 · Drizzle 数据层 · scrypt 会话认证 ·
 ```
 
 聊天层为自建实现（2026-09-02 切流）：消息落库 → SSE fanout（携 DB id + client_msg_id 双去重键）→
-内联 AI 闸门（意图识别/归属判定/确认卡）。OpenIM 已退役（容器停止保留观察期，详见交接文档）。
+内联 AI 闸门（意图识别/归属判定/确认卡）。OpenIM 已退役并物理下线（2026-09-03，详见交接文档）。
 
 ## 代码结构（npm workspaces monorepo）
 
@@ -106,8 +106,7 @@ node ../scripts/quality-report.mjs      # 识别质量周报（只读）
 
 ## OpenIM（已退役）
 
-2026-09-02 切流自建聊天层后，OpenIM 不再参与任何链路。历史容器仅 `docker stop` 保留
-2–4 周观察期（回滚窗口，见交接文档），届时 compose 移除 + prune。历史代码见
+2026-09-02 切流自建聊天层，OpenIM 不再参与任何链路；2026-09-03（Task 3.7）全部容器、镜像与数据卷已物理删除，Docker 不再是运行依赖。历史代码见
 git tag `python-backend-final`（Python 时代）与 `openim-era-final`（OpenIM 时代终态）。
 
 ## 关键设计决策
