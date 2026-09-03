@@ -146,7 +146,8 @@ export async function messageList(convId?: string): Promise<MessageRow[]> {
 // ============ 审计 ============
 
 export async function auditLog(actor: string, action: string, detail: Record<string, unknown> | null = null): Promise<void> {
-  await db.insert(audit).values({ actor, action, detail: detail ? JSON.stringify(detail) : null });
+  // ts 必须显式写入：schema 无默认值，漏写会导致新行 ts=NULL，被质量统计窗口静默过滤（2026-09-03 实证）
+  await db.insert(audit).values({ actor, action, detail: detail ? JSON.stringify(detail) : null, ts: new Date() });
 }
 
 /** 生产 audit 已对齐代码 schema（ts + TEXT detail，drizzle 0000 迁移），探测分支退役。 */

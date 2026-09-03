@@ -35,6 +35,39 @@ export async function qualityReport(days = 7): Promise<Record<string, unknown>> 
   const denom = confirm + reject;
   const onePass = denom ? Math.round((confirm / denom) * 10000) / 10000 : null;
 
+  // 真实口径：关联 task 排除挖掘/纪要派生任务（mine#*/minutes#*，用户在面板上拒绝
+  // 候选不算 AI 误判）；e2e 任务验收后已清理，taskId 关联不到自然被排除。
+  const coreRows = await rows<{ a: string; n: string }>(
+    sql`SELECT a.action AS a, COUNT(*)::text AS n
+        FROM audit a
+        JOIN task t ON t.id = (a.detail::jsonb ->> 'taskId')::int
+        WHERE a.action IN ('confirm','reject')
+          AND a.ts >= NOW() - INTERVAL ${sql.raw(`'${daysInt} days'`)}
+          AND t.creator NOT LIKE 'mine#%' AND t.creator NOT LIKE 'minutes#%'
+        GROUP BY a.action`);
+  const coreCounts: Record<string, number> = {};
+  for (const r of coreRows) coreCounts[r.a] = Number(r.n);
+  const coreConfirm = coreCounts["confirm"] ?? 0;
+  const coreReject = coreCounts["reject"] ?? 0;
+  const coreDenom = coreConfirm + coreReject;
+  const coreOnePass = coreDenom ? Math.round((coreConfirm / coreDenom) * 10000) / 10000 : null;
+
+  // 识别延迟按来源拆分（sdk_message 是测试/验收入口，会拉高全量 P95；
+  // 真实路径为 send_endpoint，openim_callback 为 P3 切流前历史）。
+  const srcRows = await rows<{ s: string; n: string; p50: string | null; p95: string | null }>(
+    sql`SELECT COALESCE(d ->> 'source', '(unknown)') AS s, COUNT(*)::text AS n,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY (d ->> 'latency_ms')::numeric) AS p50,
+               percentile_cont(0.95) WITHIN GROUP (ORDER BY (d ->> 'latency_ms')::numeric) AS p95
+        FROM (SELECT detail::jsonb AS d FROM audit WHERE action='ai_processed'
+              AND ts >= NOW() - INTERVAL ${sql.raw(`'${daysInt} days'`)}) x
+        WHERE d ? 'latency_ms'
+        GROUP BY 1 ORDER BY 1`);
+  const latencyBySource = srcRows.map((r) => ({
+    source: r.s, n: Number(r.n),
+    p50_ms: r.p50 === null ? null : Math.round(Number(r.p50)),
+    p95_ms: r.p95 === null ? null : Math.round(Number(r.p95)),
+  }));
+
   const latRows = await rows<{ d: unknown }>(
     sql`SELECT detail AS d FROM audit WHERE action='ai_processed' AND ts >= NOW() - INTERVAL ${sql.raw(`'${daysInt} days'`)}`);
   const lat = latRows
@@ -55,7 +88,7 @@ export async function qualityReport(days = 7): Promise<Record<string, unknown>> 
 
   const confRows = await rows<{ conf: string | null; n: string; cf: string; rj: string }>(
     sql`SELECT confidence AS conf, COUNT(*)::text AS n,
-            SUM(CASE WHEN status='confirmed' THEN 1 ELSE 0 END)::text AS cf,
+            SUM(CASE WHEN status IN ('confirmed','done') THEN 1 ELSE 0 END)::text AS cf,
             SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END)::text AS rj
      FROM task WHERE confidence IS NOT NULL GROUP BY confidence`);
   const confidence = confRows.map((r) => ({
@@ -85,6 +118,12 @@ export async function qualityReport(days = 7): Promise<Record<string, unknown>> 
       dedup_skipped: counts["ai_dedup_skip"] ?? 0,
     },
     one_pass_rate: onePass,
+    core: {
+      confirm: coreConfirm,
+      reject: coreReject,
+      one_pass_rate: coreOnePass,
+    },
+    latency_by_source: latencyBySource,
     reject_reasons: rejectReasons,
     confidence,
     pending_stale: pendingStale,

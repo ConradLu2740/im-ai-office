@@ -37,8 +37,11 @@ const lines = [
   `去重拦截         ${String(t.dedup_skipped).padStart(6)} 次`,
   "",
   `一次确认通过率   ${fmtRate(rep.one_pass_rate)}   （confirm ${t.confirm} / reject ${t.reject}，产品验收线 80%）`,
-  `取消任务         ${String(t.cancelled).padStart(6)} 个`,
 ];
+if (rep.core && (rep.core.confirm || rep.core.reject)) {
+  lines.push(`  └ 真实口径     ${fmtRate(rep.core.one_pass_rate)}   （confirm ${rep.core.confirm} / reject ${rep.core.reject}，排除挖掘/纪要派生与 e2e 流量）`);
+}
+lines.push(`取消任务         ${String(t.cancelled).padStart(6)} 个`);
 if (rep.reject_reasons?.length) {
   lines.push("驳回原因分布：");
   for (const it of rep.reject_reasons.slice(0, 10)) {
@@ -54,11 +57,18 @@ if (rep.confidence?.length) {
 }
 const lat = rep.latency;
 lines.push("");
-lines.push(
-  lat.n
-    ? `识别延迟（${lat.n} 条）：P50 ${lat.p50_ms}ms · P95 ${lat.p95_ms}ms`
-    : "识别延迟：窗口内无数据",
-);
+lines.push("");
+if (lat.n) {
+  lines.push(`识别延迟（${lat.n} 条）：P50 ${lat.p50_ms}ms · P95 ${lat.p95_ms}ms`);
+  if (rep.latency_by_source?.length) {
+    lines.push("  分源明细（send_endpoint 为真实路径，sdk_message 为测试/验收入口）：");
+    for (const s of rep.latency_by_source) {
+      lines.push(`    ${String(s.source).padEnd(14)} n=${String(s.n).padStart(4)}  P50 ${s.p50_ms ?? "-"}ms · P95 ${s.p95_ms ?? "-"}ms`);
+    }
+  }
+} else {
+  lines.push("识别延迟：窗口内无数据");
+}
 if (rep.pending_stale?.length) {
   lines.push(`⚠ 挂起任务 ${rep.pending_stale.length} 个（pending 超 48h 无人处理，疑似误判）`);
 }
