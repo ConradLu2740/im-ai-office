@@ -83,6 +83,40 @@ describe("P1 · 任务状态流转原子性（tasks.ts 核心）", () => {
   });
 });
 
+describe("P1 · 挖掘候选裁决防双签（mine.ts）", () => {
+  async function mkCandidate(kind: string, payload: Record<string, unknown>): Promise<number> {
+    const row = await one<{ id: string }>(
+      "INSERT INTO mine_candidate(conv_id, kind, payload, evidence, msg_count, status) VALUES('sg_t7',$1,$2,'证据',1,'pending') RETURNING id",
+      [kind, JSON.stringify(payload)]);
+    return Number(row!.id);
+  }
+
+  it("并发双 decide 只有一个成功；person/alias 只建一份", async () => {
+    const { decideCandidate } = await import("../src/mine.js");
+    const cid = await mkCandidate("alias", { real_name: "T7人名", alias: "T7花名" });
+    const results = await Promise.allSettled([
+      decideCandidate(cid, "accept"),
+      decideCandidate(cid, "accept"),
+    ]);
+    const ok = results.filter((r) => r.status === "fulfilled");
+    const bad = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    expect(ok.length).toBe(1);
+    expect(bad.length).toBe(1);
+    expect(String(bad[0].reason)).toContain("already_decided");
+    expect(Number((await one("SELECT COUNT(*)::int AS n FROM person WHERE real_name='T7人名'"))!.n)).toBe(1);
+    expect(Number((await one(
+      "SELECT COUNT(*)::int AS n FROM alias a JOIN person p ON a.person_id=p.id WHERE p.real_name='T7人名' AND a.name='T7花名'"))!.n)).toBe(1);
+  });
+
+  it("串行重复 decide → already_decided；不存在 → null；accept 失败回滚 pending", async () => {
+    const { decideCandidate } = await import("../src/mine.js");
+    const cid = await mkCandidate("term", { term: "T7术语", meaning: "含义" });
+    await decideCandidate(cid, "accept");
+    await expect(decideCandidate(cid, "accept")).rejects.toThrow("already_decided");
+    expect(await decideCandidate(9999999, "accept")).toBeNull();
+  });
+});
+
 describe("P0 · extra 端点鉴权（纪要/挖掘）", () => {
   it("全部端点无 token → 401", async () => {
     for (const [path, method] of [
