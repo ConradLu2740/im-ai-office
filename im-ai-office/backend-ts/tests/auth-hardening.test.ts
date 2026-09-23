@@ -165,6 +165,33 @@ describe("P0 · extra 端点鉴权（纪要/挖掘）", () => {
   });
 });
 
+describe("P1 · SSE 事件投递延迟（misc.ts flush）", () => {
+  it("fanout 后 3 秒内到达客户端（不再等 15s flush）", async () => {
+    const { app } = await import("../src/app.js");
+    const { fanout } = await import("../src/sse.js");
+    const token = await mkSession("user-t9", "SSE用户");
+    const res = await app.request(`/api/events/stream?token=${token}`);
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    setTimeout(() => fanout("task_status", { taskId: 999001, status: "confirmed" }), 100);
+    const t0 = Date.now();
+    let got = "";
+    try {
+      while (Date.now() - t0 < 6000) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        got += decoder.decode(value, { stream: true });
+        if (got.includes("task_status")) break;
+      }
+    } finally {
+      await reader.cancel();
+    }
+    expect(got).toContain("task_status");
+    expect(Date.now() - t0).toBeLessThan(3000);
+  }, 15000);
+});
+
 describe("P0 · misc 端点鉴权与归属收敛（SSE/私信/审计）", () => {
   it("SSE 流：无 token → 401；?token= 有效 token → 200", async () => {
     const { app } = await import("../src/app.js");

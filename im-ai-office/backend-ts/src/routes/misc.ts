@@ -30,13 +30,21 @@ export const miscRoutes = new Hono()
     subscribe(sink);
     try {
       await stream.writeSSE({ data: "connected", event: "hello" });
+      // 1s 轮询 flush（原 15s：fanout 事件最坏延迟 15 秒，"实时"名不副实）；
+      // keepalive 每 15 个 tick（≈15s）发一次，防代理断链
+      let ticks = 0;
       while (true) {
         if (pending.length) {
           for (const line of pending) await stream.writeSSE({ data: line });
           pending = [];
+          ticks = 0;
         }
-        await stream.writeSSE({ data: ": keepalive" });
-        await stream.sleep(15_000);
+        ticks += 1;
+        if (ticks >= 15) {
+          await stream.writeSSE({ data: ": keepalive" });
+          ticks = 0;
+        }
+        await stream.sleep(1_000);
       }
     } catch { /* 客户端断开 */ }
     finally { unsubscribe(sink); }
