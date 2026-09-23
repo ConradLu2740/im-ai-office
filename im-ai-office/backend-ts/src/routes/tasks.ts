@@ -29,9 +29,19 @@ export const taskRoutes = new Hono()
   const user = await requireUser(c);
   if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
+  const message = String(body.message ?? "");
+  const sender = String(body.sender ?? "李娜(娜姐)");
+  if (!message) return c.json({ ok: false, error: "message 不能为空" });
+  // 与 simulate/sdk 同一套 event_dedup 去重（原 /api/chat 直穿管线，同消息会重复建任务）
+  const msgId = deterministicMsgId("sg_chat", sender, message);
+  if (await isDuplicate(msgId)) {
+    await auditLog("entry", "ai_dedup_skip", { msgId, source: "chat" });
+    return c.json({ ok: true, dedup: true, msg_id: msgId });
+  }
   const t0 = performance.now();
-  const result = await processMessage(String(body.message ?? ""), String(body.sender ?? "李娜(娜姐)"));
-  await auditAiProcessed(null, result, String(body.message ?? ""), "chat", performance.now() - t0);
+  const result = await processMessage(message, sender);
+  await auditAiProcessed(msgId, result, message, "chat", performance.now() - t0);
+  await markConsumed(msgId);
   return c.json(result);
 })
 

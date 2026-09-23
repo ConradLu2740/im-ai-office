@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkSession } from "./setup.js";
+import { mkSession, makeFakeLlm, makeIntent } from "./setup.js";
 import { query, one } from "../src/db.js";
 
 // P0 安全加固：管理端点 fail-closed + 任务端点强制登录
@@ -80,6 +80,21 @@ describe("P1 · 任务状态流转原子性（tasks.ts 核心）", () => {
     const [a, b] = await Promise.all([confirmTask(tid), confirmTask(tid)]);
     expect([a, b].filter(Boolean).length).toBe(1);
     expect((await one("SELECT status FROM task WHERE id=$1", [tid]))!.status).toBe("confirmed");
+  });
+});
+
+describe("P1 · /api/chat 去重（同消息不重复建任务）", () => {
+  it("同一 sender+message 30 分钟内重投 → 第二次 dedup，任务只建一个", async () => {
+    makeFakeLlm([{ match: "提醒我交报表", intent: makeIntent({ is_task: true, confidence: "high",
+      content: "交报表", assignee_hint: null, deadline_hint: "周五前", assign_mode: "none" }) }]);
+    const token = await mkSession("user-t8", "Chat用户");
+    const auth = { Authorization: `Bearer ${token}` };
+    const r1 = await req("/api/chat", "POST", { message: "提醒我交报表", sender: "测试员" }, auth);
+    expect((r1.body as Record<string, unknown>).action).toBe("task_created");
+    expect(Number((await one("SELECT COUNT(*)::int AS n FROM task WHERE content='交报表'"))!.n)).toBe(1);
+    const r2 = await req("/api/chat", "POST", { message: "提醒我交报表", sender: "测试员" }, auth);
+    expect(r2.body.dedup).toBe(true);
+    expect(Number((await one("SELECT COUNT(*)::int AS n FROM task WHERE content='交报表'"))!.n)).toBe(1);
   });
 });
 
