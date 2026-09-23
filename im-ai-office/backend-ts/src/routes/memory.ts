@@ -65,4 +65,3 @@ export const memoryRoutes = new Hono()
     },
   });
 });
-void auditLog;

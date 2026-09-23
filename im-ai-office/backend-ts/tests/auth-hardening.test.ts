@@ -83,6 +83,24 @@ describe("P1 · 任务状态流转原子性（tasks.ts 核心）", () => {
   });
 });
 
+describe("P0 · errText 单元（错误消息提取）", () => {
+  it("取 Error.message；自定义 name 的子类不透传前缀；非 Error 原样字符串化", async () => {
+    const { errText } = await import("../src/errtext.js");
+    class ValueError extends Error { name = "ValueError"; }
+    expect(errText(new ValueError("invalid role: x"))).toBe("invalid role: x");
+    expect(errText(new Error("boom"))).toBe("boom");
+    expect(errText("plain string")).toBe("plain string");
+  });
+});
+
+describe("P0 · 错误消息不回削（errText）", () => {
+  it("非法角色的报错是完整 message，不是 Valueinvalid…", async () => {
+    const r = await req("/api/role/set", "POST", { oim_user_id: "u-err", role: "superadmin" }, ADMIN);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.error).toBe("invalid role: superadmin");
+  });
+});
+
 describe("P1 · /api/chat 去重（同消息不重复建任务）", () => {
   it("同一 sender+message 30 分钟内重投 → 第二次 dedup，任务只建一个", async () => {
     makeFakeLlm([{ match: "提醒我交报表", intent: makeIntent({ is_task: true, confidence: "high",

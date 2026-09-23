@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { checkAdmin } from "../deps.js";
-import { auditLog } from "../repos.js";
+import { errText } from "../errtext.js";
+
 import { canDo, decideApproval, getRole, listRoles, listApprovals, requireApproval, setRole } from "../rbac.js";
 import { fanout } from "../sse.js";
 
@@ -14,7 +15,7 @@ export const rbacRoutes = new Hono()
     await setRole(String(body.oim_user_id ?? ""), String(body.role ?? ""));
     return c.json({ ok: true, role: await getRole(String(body.oim_user_id ?? "")) });
   } catch (e) {
-    return c.json({ ok: false, error: String(e).replace("Error: ", "") });
+    return c.json({ ok: false, error: errText(e) });
   }
 })
 
@@ -58,4 +59,3 @@ export const rbacRoutes = new Hono()
     return c.json({ ok: false, error: String(e) });
   }
 });
-void auditLog;

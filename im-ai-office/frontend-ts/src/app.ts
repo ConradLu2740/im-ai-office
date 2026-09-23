@@ -1221,6 +1221,8 @@ function renderAICard(r: AiCardResult) {
 }
 
 // 实时事件（网关收敛后：SSE 是唯一实时通道，消息/任务/卡片都走这里）
+// Electron 壳系统通知的事件类型（主进程 ipcMain "notify" 通道；主进程直连 SSE 已移除——无法带 token）
+const NOTIFY_EVENT_TYPES = new Set(["task_created", "reminder", "digest", "ai.card"]);
 let esAI: EventSource | null = null;
 let _lastReconnectRefresh = 0;
 let _sseRetryMs = 0;
@@ -1279,6 +1281,11 @@ function initSSE() {
         if (ev.type === "task_status") loadTasks(); // 确认/驳回/更新后的轻量收敛：全量刷新（5s 轮询兜底不变）
         if (ev.type === "task_completed") { loadTasks(); showToast("任务已完成 ✅", true); }
         if (ev.type === "task_created" || ev.type === "ai.card") updateAIUnread();
+        // Electron 壳：通知类事件转发主进程弹系统通知（渲染层持有 token，主进程直连 SSE 已移除）
+        if (ev.type && NOTIFY_EVENT_TYPES.has(ev.type) && window.imai?.ipc) {
+          const body = (ev as { content?: string; text?: string }).content ?? (ev as { text?: string }).text ?? ev.type;
+          window.imai.ipc.invoke("notify", { title: "IMAI 提醒", body }).catch(() => {});
+        }
       } catch (_) {}
     };
     // 断线重连增强：网络错误时 EventSource 通常自动重连，但后端重启等场景可能进入

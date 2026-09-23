@@ -3,6 +3,7 @@ import { generateMinutes, getMinutes, listMinutes, minutesToTask } from "../minu
 import { runMining, listCandidates, decideCandidate } from "../mine.js";
 import { requireUser } from "../deps.js";
 import { getRole } from "../rbac.js";
+import { errText } from "../errtext.js";
 
 /** 登录 + admin 双重门（LLM 燃烧端点用）：返回 user 或直接给出 401/403 响应 */
 async function adminGate(c: import("hono").Context) {
@@ -24,7 +25,7 @@ export const extraRoutes = new Hono()
     const m = await generateMinutes(String(body.conv_id ?? ""), Number(body.limit ?? 50));
     return c.json({ ok: true, minutes: m });
   } catch (e) {
-    return c.json({ ok: false, error: String(e).replace("Error: ", "") });
+    return c.json({ ok: false, error: errText(e) });
   }
 })
   .get("/api/minutes", async (c) => {
@@ -52,7 +53,7 @@ export const extraRoutes = new Hono()
     if (taskId === null) return c.json({ ok: false, error: "minutes not found" }, 404);
     return c.json({ ok: true, taskId });
   } catch (e) {
-    return c.json({ ok: false, error: String(e).replace("Error: ", "") }, 400);
+    return c.json({ ok: false, error: errText(e) }, 400);
   }
 })
 
@@ -66,7 +67,7 @@ export const extraRoutes = new Hono()
     const r = await runMining(String(body.conv_id ?? ""), Number(body.limit ?? 500), Number(body.batch ?? 100));
     return c.json({ ok: true, ...r });
   } catch (e) {
-    return c.json({ ok: false, error: String(e).replace("Error: ", "") }, 400);
+    return c.json({ ok: false, error: errText(e) }, 400);
   }
 })
   .get("/api/mine/candidates", async (c) => {
@@ -87,6 +88,6 @@ export const extraRoutes = new Hono()
     if (r === null) return c.json({ ok: false, error: "candidate not found" }, 404);
     return c.json({ ok: true, ...r });
   } catch (e) {
-    return c.json({ ok: false, error: String(e).replace("Error: ", "") }, 400);
+    return c.json({ ok: false, error: errText(e) }, 400);
   }
 });

@@ -18,8 +18,6 @@ const env: BackendEnv = {
 const backend = new BackendManager(env);
 const APP_URL = "http://127.0.0.1:8000/";
 
-const NOTIFY_EVENT_TYPES = new Set(["task_created", "reminder", "digest", "ai.card"]);
-
 function iconPath(): string {
   // 打包：resources 根下的 icon.png（extraResources 携带）；dev：electron/icons/icon.png
   const p = app.isPackaged
@@ -68,59 +66,6 @@ async function setupTray(): Promise<void> {
     ]),
   );
   tray.on("click", () => { win?.show(); win?.focus(); });
-}
-
-/** 未读角标：/api/ai_dm unread + /api/tasks pending（30s 轮询） */
-async function refreshBadge(): Promise<void> {
-  if (!tray) return;
-  try {
-    const dm = (await (await fetch("http://127.0.0.1:8000/api/ai_dm?sender_id=user001")).json()) as { unread?: number };
-    const tasks = (await (await fetch("http://127.0.0.1:8000/api/tasks")).json()) as unknown;
-    const pending = Array.isArray(tasks)
-      ? (tasks as { status?: string }[]).filter((t) => t.status === "pending_confirmation" || t.status === "pending_assignee").length
-      : 0;
-    const n = (dm.unread ?? 0) + pending;
-    tray.setToolTip(n > 0 ? `IMAI 办公助手（未读/待办 ${n}）` : "IMAI 办公助手");
-    tray.setImage(iconPath());
-  } catch { /* 后端未就绪，忽略 */ }
-}
-
-/** 通知桥：主进程直连后端 SSE，task_created/reminder/digest/ai.card → 系统通知 */
-async function sseNotifyBridge(): Promise<void> {
-  for (;;) {
-    try {
-      if (!(await backendHttpOk("/api/events/stream", 2000))) {
-        await new Promise((r) => setTimeout(r, 15000));
-        continue;
-      }
-      const res = await fetch("http://127.0.0.1:8000/api/events/stream");
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (!line.startsWith("data:")) continue;
-          try {
-            const evt = JSON.parse(line.slice(5).trim()) as { type?: string; title?: string; text?: string };
-            if (evt.type && NOTIFY_EVENT_TYPES.has(evt.type) && Notification.isSupported()) {
-              new Notification({
-                title: evt.title ?? "IMAI 提醒",
-                body: evt.text ?? evt.type,
-                icon: iconPath(),
-              }).show();
-            }
-          } catch { /* 非 JSON 行，忽略 */ }
-        }
-      }
-    } catch { /* 断线重连 */ }
-    await new Promise((r) => setTimeout(r, 5000));
-  }
 }
 
 /** IPC 白名单实现（preload 只暴露 invoke(channel, payload)，此处统一校验） */
@@ -214,9 +159,9 @@ async function main(): Promise<void> {
   } catch (err) {
     console.error("[imai-electron] 托盘初始化失败：", err);
   }
-  void refreshBadge();
-  setInterval(refreshBadge, 30000);
-  void sseNotifyBridge();
+  // P0 清理：refreshBadge（硬编码 user001、无鉴权、响应形状错误，三重坏）与
+  // sseNotifyBridge（主进程直连 SSE 无法携带 token，T3 起必 401）已移除；
+  // 系统通知改由渲染层经 ipcMain "notify" 通道转发（见 frontend-ts/src/app.ts）。
 }
 
 app.on("window-all-closed", () => {
