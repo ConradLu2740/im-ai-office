@@ -147,7 +147,7 @@ async function accept(cand: Record<string, unknown>): Promise<Record<string, unk
   throw new Error("bad_kind");
 }
 
-export async function decideCandidate(cid: number, action: string): Promise<Record<string, unknown> | null> {
+export async function decideCandidate(cid: number, action: string, decidedBy = "user"): Promise<Record<string, unknown> | null> {
   const rows = await db.select().from(mineCandidate).where(eq(mineCandidate.id, cid)).limit(1);
   if (!rows.length) return null;
   const cand = rowToDict(rows[0] as unknown as Record<string, unknown>);
@@ -155,9 +155,9 @@ export async function decideCandidate(cid: number, action: string): Promise<Reco
   if (cand.status !== "pending") throw new Error("already_decided");
   const result = action === "accept" ? await accept(cand) : {};
   await db.update(mineCandidate)
-    .set({ status: action === "accept" ? "accepted" : "rejected", decidedAt: sql`NOW()`, decidedBy: "user" })
+    .set({ status: action === "accept" ? "accepted" : "rejected", decidedAt: sql`NOW()`, decidedBy })
     .where(eq(mineCandidate.id, cid));
-  await auditLog("user", action === "accept" ? "mine_accepted" : "mine_rejected",
+  await auditLog(decidedBy, action === "accept" ? "mine_accepted" : "mine_rejected",
     { candidateId: cid, kind: cand.kind, ...result });
   return { id: cid, status: action === "accept" ? "accepted" : "rejected", result };
 }

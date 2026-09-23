@@ -83,6 +83,39 @@ describe("P1 · 任务状态流转原子性（tasks.ts 核心）", () => {
   });
 });
 
+describe("P0 · extra 端点鉴权（纪要/挖掘）", () => {
+  it("全部端点无 token → 401", async () => {
+    for (const [path, method] of [
+      ["/api/minutes/generate", "POST"], ["/api/minutes", "GET"], ["/api/minutes/1", "GET"],
+      ["/api/minutes/1/task", "POST"], ["/api/mine/run", "POST"], ["/api/mine/candidates", "GET"],
+      ["/api/mine/candidates/1/decide", "POST"],
+    ] as const) {
+      const r = await req(path, method, method === "GET" ? undefined : {});
+      expect(r.status, path).toBe(401);
+    }
+  });
+
+  it("LLM 燃烧端点（mine/run、minutes/generate）：member 403，admin 放行", async () => {
+    const member = await mkSession("user-t4-m", "成员");
+    const r1 = await req("/api/mine/run", "POST", { conv_id: "sg_none" }, { Authorization: `Bearer ${member}` });
+    expect(r1.status).toBe(403);
+    const r2 = await req("/api/minutes/generate", "POST", { conv_id: "sg_none" }, { Authorization: `Bearer ${member}` });
+    expect(r2.status).toBe(403);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-t4-m','group_admin')");
+    // admin 放行 → 业务层返回（无消息 → no_messages 400），而非 401/403
+    const r3 = await req("/api/mine/run", "POST", { conv_id: "sg_none" }, { Authorization: `Bearer ${member}` });
+    expect(r3.status).toBe(400);
+    expect((r3.body.error as string).toLowerCase()).toContain("no_messages");
+  });
+
+  it("member 可读候选列表与详情（登录即可）", async () => {
+    const member = await mkSession("user-t4-r", "读者");
+    const r = await req("/api/mine/candidates", "GET", undefined, { Authorization: `Bearer ${member}` });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+});
+
 describe("P0 · misc 端点鉴权与归属收敛（SSE/私信/审计）", () => {
   it("SSE 流：无 token → 401；?token= 有效 token → 200", async () => {
     const { app } = await import("../src/app.js");
