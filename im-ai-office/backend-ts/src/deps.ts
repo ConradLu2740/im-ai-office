@@ -21,3 +21,16 @@ export async function requireAdmin(c: Context): Promise<{ user: SessionUser | nu
   if ((await getRole(user.id)) !== "group_admin") return { user: null, denied: c.json({ ok: false, error: "forbidden" }, 403) };
   return { user, denied: null };
 }
+
+/**
+ * 会话历史读取权限（M5）：group_admin 任意读；成员只能读本群（conv_id 形如 sg_<group_id>）；
+ * 非 sg_ 前缀的会话不开放历史读取。无 conv_id 的全量读取仅 admin。
+ */
+export async function canReadConv(user: SessionUser, convId: string | null | undefined): Promise<boolean> {
+  const { getRole } = await import("./rbac.js");
+  if ((await getRole(user.id)) === "group_admin") return true;
+  if (!convId) return false;
+  if (!convId.startsWith("sg_")) return false;
+  const { isGroupMember } = await import("./repos.js");
+  return isGroupMember(user.id, convId.slice(3));
+}

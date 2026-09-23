@@ -9,11 +9,13 @@ import { requireUser } from "../deps.js";
 import { sessionUser, type SessionUser } from "../auth.js";
 import { getRole } from "../rbac.js";
 
-/** 私信归属收敛：非 admin 只能看/已读自己的私信（原可按 sender_id 读任何人） */
-async function dmScope(requested: string | null, user: SessionUser): Promise<string | null> {
-  if (!requested || requested === user.id) return requested ?? user.id;
+/** 私信归属收敛：非 admin 查他人 sender_id → 显式 403（M3：原静默返回自己数据，UI 像"空的"） */
+async function dmScope(c: import("hono").Context, requested: string | null, user: SessionUser):
+    Promise<{ senderId: string | null; denied: Response | null }> {
+  if (!requested || requested === user.id) return { senderId: requested ?? user.id, denied: null };
   const isAdmin = (await getRole(user.id)) === "group_admin";
-  return isAdmin ? requested : user.id;
+  if (!isAdmin) return { senderId: null, denied: c.json({ ok: false, error: "forbidden" }, 403) };
+  return { senderId: requested, denied: null };
 }
 
 export const miscRoutes = new Hono()
@@ -53,17 +55,19 @@ export const miscRoutes = new Hono()
   .get("/api/ai_dm", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
-  const senderId = await dmScope(c.req.query("sender_id") || null, user);
-  const msgs = await aiDmList(senderId);
-  const unread = await aiDmUnreadCount(senderId);
+  const scope = await dmScope(c, c.req.query("sender_id") || null, user);
+  if (scope.denied) return scope.denied;
+  const msgs = await aiDmList(scope.senderId);
+  const unread = await aiDmUnreadCount(scope.senderId);
   return c.json({ ok: true, messages: msgs, unread });
 })
   .post("/api/ai_dm/read", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
-  const senderId = await dmScope(String(body?.sender_id ?? "") || null, user);
-  await aiDmMarkRead(senderId);
+  const scope = await dmScope(c, String(body?.sender_id ?? "") || null, user);
+  if (scope.denied) return scope.denied;
+  await aiDmMarkRead(scope.senderId);
   return c.json({ ok: true });
 })
   .get("/api/audit", async (c) => {

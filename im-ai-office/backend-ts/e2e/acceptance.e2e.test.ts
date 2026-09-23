@@ -67,7 +67,9 @@ afterAll(async () => {
 describe("IMAI 一键验收（自建聊天层契约）", () => {
   it("[0] 服务健康：后端 8000 可达", async () => {
     const r = await api("/api/tasks", undefined, "GET", authHeaders());
-    expect(r).toBeDefined();
+    // M1：断言 ok===true（原 toBeDefined 连 401 body 都算过，鉴权恰是本轮主题）
+    expect(r.ok).toBe(true);
+    expect(Array.isArray((r as { tasks?: unknown }).tasks)).toBe(true);
   });
 
   it("[0] 启动时无 e2e 任务残留", async () => {

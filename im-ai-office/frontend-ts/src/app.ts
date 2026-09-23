@@ -208,11 +208,11 @@ function setSDKStatus(text: string, ok: boolean) {
 }
 
 async function initSDK(userID: string, token: string) {
-  // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供（initSSE），
-  // 会话列表走后端 REST（loadConversations）。此函数仅保留入口语义。
-  // 注意：onload 时 initSSE 已先行且本地连接毫秒级完成——此处不得覆盖已连接状态
-  //（2026-09-03 实证：覆盖后无第二次 onopen，状态永远卡"连接中"，纯显示 bug）
+  // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供。
+  // M2：登录（doLogin）与会话恢复（onload）两条路径都经本函数，SSE 统一在此建立；
+  // 未登录时 initSSE 自行跳过，已连接则不重连。
   if (!esAI || esAI.readyState !== 1) setSDKStatus("实时通道连接中…", false);
+  initSSE();
   loadConversations();
   startSelfHeal();
 }
@@ -1229,6 +1229,8 @@ let _sseRetryMs = 0;
 let _sseDiagTimer: number | null = null;
 function initSSE() {
   if (!window.EventSource || esAI) return;
+  // M2：未登录不建流（原匿名直连 SSE 必 401，还会按退避反复重撞）
+  if (!apiToken()) return;
   try {
     // P0：SSE 端点已要求登录；EventSource 不能带 header → token 走 ?token=（见后端 misc.ts）
     const tok = apiToken();
@@ -1296,8 +1298,23 @@ function initSSE() {
       if (esAI && esAI.readyState === 2) {
         esAI.close();
         esAI = null;
-        _sseRetryMs = _sseRetryMs ? Math.min(_sseRetryMs * 2, 30000) : 2000;
-        setTimeout(initSSE, _sseRetryMs);
+        // M2：重建前先验会话——token 失效则回登录页，不再指数退避地反复撞 401
+        fetch(API_BASE + "/api/auth/me", { headers: { Authorization: "Bearer " + (apiToken() ?? "") } })
+          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+          .then((me) => {
+            if (!me.ok) return Promise.reject("invalid");
+            _sseRetryMs = _sseRetryMs ? Math.min(_sseRetryMs * 2, 30000) : 2000;
+            setTimeout(initSSE, _sseRetryMs);
+          })
+          .catch(() => {
+            localStorage.removeItem("imai_user");
+            localStorage.removeItem("imai_token");
+            currentUser = null;
+            currentToken = null;
+            apiSetSession(null, null);
+            setSDKStatus("登录态已过期，请重新登录", false);
+            document.getElementById("loginPage").classList.remove("hidden");
+          });
       }
     };
     // 诊断：5s 后仍未连上，在状态文本中暴露 EventSource.readyState
@@ -1345,7 +1362,7 @@ window.onload = () => {
   setInterval(checkBackend, 3000);
   setInterval(() => { if (currentToken) loadTasks(); }, 5000);
   setInterval(() => { if (currentToken) updateAIUnread(); }, 5000);
-  initSSE();   // 新增：实时事件推送（轮询保留作兑底）
+  // M2：SSE 改由 initSDK（登录/会话恢复成功后）建立，此处不再匿名预连
   if (getTauriInvoke()) setTimeout(startBackend, 500);
 };
 

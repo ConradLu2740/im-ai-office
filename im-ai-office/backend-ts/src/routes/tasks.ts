@@ -8,6 +8,7 @@ import { deterministicMsgId, isDuplicate, markConsumed } from "../sse.js";
 import { aiDmSend } from "../aiDm.js";
 import { buildConfirmText } from "../actions.js";
 import { requireUser } from "../deps.js";
+import { canReadConv } from "../deps.js";
 
 function extractTextContent(raw: unknown): string {
   if (raw && typeof raw === "object") {
@@ -124,6 +125,10 @@ export const taskRoutes = new Hono()
   .get("/api/messages", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  // M5：成员只能读本群历史；无 conv_id 的全量读取限 group_admin
+  if (!(await canReadConv(user, c.req.query("conv_id")))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   const convId = c.req.query("conv_id");
   const rows = await messageList(convId || undefined);
   return c.json({ messages: rows });

@@ -8,6 +8,7 @@ import { fanout } from "../sse.js";
 import { processMessage, auditAiProcessed } from "../pipeline.js";
 import { executeAiActions } from "../actions.js";
 import { requireUser } from "../deps.js";
+import { canReadConv } from "../deps.js";
 
 // ============ 自建聊天层路由（P3；Spec §4.2） ============
 // 发送端点内联 AI 入口（闸门平移）：落库（唯一约束幂等）→ processMessage → fanout
@@ -97,10 +98,13 @@ export const messagesRoutes = new Hono()
   })
 
   // 会话历史（现有 messageList 语义保留在此别名，便于前端统一走 /api/messages/*）
-  // C1 修复：必须登录（原匿名可读，且缺 conv_id 时 WHERE TRUE 裸全表）
+  // C1 修复：必须登录；M5：成员只能读本群历史，无 conv_id 全量限 group_admin
   .get("/api/messages/history", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  if (!(await canReadConv(user, c.req.query("conv_id")))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   const convId = c.req.query("conv_id");
   const rows = await db.select().from(message)
     .where(convId ? eq(message.convId, convId) : sql`TRUE`)

@@ -1,6 +1,14 @@
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "./db/drizzle.js";
-import { aiDm, alias, audit, message, person, task, term } from "./db/schema.js";
+import { aiDm, alias, audit, groupMember, message, person, task, term } from "./db/schema.js";
+
+/** 群成员校验（M5：会话历史按群归属收窄）；group_id 为不带 sg_ 前缀的原始 id */
+export async function isGroupMember(userId: string, groupId: string): Promise<boolean> {
+  const rows = await db.select({ x: groupMember.groupId }).from(groupMember)
+    .where(and(eq(groupMember.groupId, groupId), eq(groupMember.userId, userId)))
+    .limit(1);
+  return rows.length > 0;
+}
 
 // 数据访问层（Drizzle 查询构建器；行为与手写 SQL 版逐字等价，返回键保持 snake_case）
 

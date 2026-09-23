@@ -1,24 +1,15 @@
 import { Hono } from "hono";
 import { generateMinutes, getMinutes, listMinutes, minutesToTask } from "../minutes.js";
 import { runMining, listCandidates, decideCandidate } from "../mine.js";
-import { requireUser } from "../deps.js";
-import { getRole } from "../rbac.js";
+import { requireAdmin, requireUser } from "../deps.js";
 import { errText } from "../errtext.js";
-
-/** 登录 + admin 双重门（LLM 燃烧端点用）：返回 { user, denied }，denied 非空即返回它 */
-async function adminGate(c: import("hono").Context): Promise<{ user: import("../auth.js").SessionUser | null; denied: Response | null }> {
-  const user = await requireUser(c);
-  if (!user) return { user: null, denied: c.json({ ok: false, error: "unauthorized" }, 401) };
-  if ((await getRole(user.id)) !== "group_admin") return { user: null, denied: c.json({ ok: false, error: "forbidden" }, 403) };
-  return { user, denied: null };
-}
 
 export const extraRoutes = new Hono()
 
 // ---- 会议纪要（迭代2 B2）----
 
   .post("/api/minutes/generate", async (c) => {
-  const g = await adminGate(c);
+  const g = await requireAdmin(c);
   if (g.denied) return g.denied;
   const body = await c.req.json().catch(() => ({}));
   try {
@@ -60,7 +51,7 @@ export const extraRoutes = new Hono()
 // ---- B4 历史挖掘 ----
 
   .post("/api/mine/run", async (c) => {
-  const g = await adminGate(c);
+  const g = await requireAdmin(c);
   if (g.denied) return g.denied;
   const body = await c.req.json().catch(() => ({}));
   try {
@@ -78,13 +69,14 @@ export const extraRoutes = new Hono()
   return c.json({ ok: true, candidates: await listCandidates(status, kind) });
 })
   .post("/api/mine/candidates/:cid/decide", async (c) => {
-  const user = await requireUser(c);
-  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  // M4：裁决写团队共享的 person/alias/term，收敛 group_admin（member 403）
+  const g = await requireAdmin(c);
+  if (g.denied) return g.denied;
   const cid = Number(c.req.param("cid"));
   if (!Number.isInteger(cid) || cid <= 0) return c.json({ ok: false, error: "invalid cid" }, 400);
   const body = await c.req.json().catch(() => ({}));
   try {
-    const r = await decideCandidate(cid, String(body.action ?? ""), user.id);
+    const r = await decideCandidate(cid, String(body.action ?? ""), g.user!.id);
     if (r === null) return c.json({ ok: false, error: "candidate not found" }, 404);
     return c.json({ ok: true, ...r });
   } catch (e) {

@@ -229,9 +229,10 @@ describe("P0 · misc 端点鉴权与归属收敛（SSE/私信/审计）", () => 
     const msgsA = rA.body.messages as Array<{ senderId: string }>;
     expect(msgsA.length).toBeGreaterThanOrEqual(1);
     expect(msgsA.every((m) => m.senderId === "user-t3-a")).toBe(true);
-    // member 指定他人 sender_id → 仍收敛到自己
+    // member 指定他人 sender_id → 403（M3：不再静默收敛）
     const rA2 = await req("/api/ai_dm?sender_id=user-t3-b", "GET", undefined, { Authorization: `Bearer ${tokenA}` });
-    expect((rA2.body.messages as Array<{ senderId: string }>).every((m) => m.senderId === "user-t3-a")).toBe(true);
+    expect(rA2.status).toBe(403);
+    expect(rA2.body.error).toBe("forbidden");
     // admin 可查他人
     await query("INSERT INTO role(oim_user_id, role) VALUES('user-t3-a','group_admin')");
     const rAdmin = await req("/api/ai_dm?sender_id=user-t3-b", "GET", undefined, { Authorization: `Bearer ${tokenA}` });
@@ -247,6 +248,48 @@ describe("P0 · misc 端点鉴权与归属收敛（SSE/私信/审计）", () => 
     expect(auditAdmin.status).toBe(200);
     expect((await req("/api/summary/daily", "GET")).status).toBe(401);
     expect((await req("/api/stats/quality", "GET")).status).toBe(401);
+  });
+});
+
+describe("Minor · 三项清理（M3 私信越权显式化 / M4 挖掘裁决收敛 / M5 会话成员校验）", () => {
+  it("M3：member 指定他人 sender_id → 403（不再静默返回自己数据）", async () => {
+    await query("INSERT INTO ai_dm(sender_id, direction, content) VALUES('user-m3-a','in','A的私信')");
+    const tokenA = await mkSession("user-m3-a", "甲");
+    const other = await req("/api/ai_dm?sender_id=user-m3-b", "GET", undefined, { Authorization: `Bearer ${tokenA}` });
+    expect(other.status).toBe(403);
+    expect((await req("/api/ai_dm", "GET", undefined, { Authorization: `Bearer ${tokenA}` })).status).toBe(200);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-m3-a','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    expect((await req("/api/ai_dm?sender_id=user-m3-b", "GET", undefined, { Authorization: `Bearer ${tokenA}` })).status).toBe(200);
+  });
+
+  it("M4：挖掘裁决收敛 group_admin（member 403）", async () => {
+    const row = await one<{ id: string }>(
+      "INSERT INTO mine_candidate(conv_id, kind, payload, evidence, msg_count, status) VALUES('sg_m4','term',$1,'证据',1,'pending') RETURNING id",
+      [JSON.stringify({ term: "M4术语", meaning: "含义" })]);
+    const cid = Number(row!.id);
+    const member = await mkSession("user-m4-m", "成员");
+    const denied = await req(`/api/mine/candidates/${cid}/decide`, "POST", { action: "accept" },
+      { Authorization: `Bearer ${member}` });
+    expect(denied.status).toBe(403);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-m4-m','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    const ok = await req(`/api/mine/candidates/${cid}/decide`, "POST", { action: "accept" },
+      { Authorization: `Bearer ${member}` });
+    expect(ok.status).toBe(200);
+    expect(ok.body.ok).toBe(true);
+  });
+
+  it("M5：/api/messages 与 history——本群 200、他人群 403、无 conv_id 成员 403、admin 豁免", async () => {
+    await query("INSERT INTO user_group(group_id, name) VALUES('g-m5-a','A群'),('g-m5-b','B群') ON CONFLICT (group_id) DO NOTHING");
+    const auth = { Authorization: `Bearer ${await mkSession("user-m5-a", "甲")}` };
+    await query("INSERT INTO group_member(group_id, user_id) VALUES('g-m5-a','user-m5-a') ON CONFLICT DO NOTHING");
+    await query("INSERT INTO message(conv_id, sender_id, sender_name, content) VALUES('sg_g-m5-a','user-m5-a','甲','你好')");
+    expect((await req("/api/messages?conv_id=sg_g-m5-a", "GET", undefined, auth)).status).toBe(200);
+    expect((await req("/api/messages?conv_id=sg_g-m5-b", "GET", undefined, auth)).status).toBe(403);
+    expect((await req("/api/messages", "GET", undefined, auth)).status).toBe(403);
+    expect((await req("/api/messages/history?conv_id=sg_g-m5-b", "GET", undefined, auth)).status).toBe(403);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-m5-a','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    expect((await req("/api/messages?conv_id=sg_g-m5-b", "GET", undefined, auth)).status).toBe(200);
+    expect((await req("/api/messages/history?conv_id=sg_g-m5-b", "GET", undefined, auth)).status).toBe(200);
   });
 });
 
@@ -286,8 +329,9 @@ describe("P0 · 剩余端点鉴权补齐（C1：messages/rbac/memory）", () => 
     }
   });
 
-  it("history 带 token 可读", async () => {
+  it("history 带 token 可读（无 conv_id 全量限 admin，M5）", async () => {
     const token = await mkSession("user-c1-h", "历史读者");
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-c1-h','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
     const r = await req("/api/messages/history", "GET", undefined, { Authorization: `Bearer ${token}` });
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);

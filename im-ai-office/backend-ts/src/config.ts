@@ -9,7 +9,7 @@ const env = (k: string, d = "") => process.env[k] ?? d;
 
 export const config = {
   port: parseInt(env("IMAI_TS_PORT", env("PORT", "8000")), 10),
-  databaseUrl: env("DATABASE_URL", "postgres://imai:openIM123@127.0.0.1:5432/imai"),
+  databaseUrl: env("DATABASE_URL", "postgres://imai:imai_secret@127.0.0.1:5432/imai"),
   // LLM（与 Python 版同名 env）
   llmBase: env("LLM_BASE", "https://api.deepseek.com/v1"),
   llmApiKey: env("LLM_API_KEY", ""),
