@@ -27,6 +27,10 @@ async function cleanup() {
   await db("DELETE FROM event_dedup");
 }
 
+function authHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${TOKEN}` };
+}
+
 async function send(text: string, extra: string) {
   return api("/api/messages/send", {
     conv_id: CONV, text, client_msg_id: `e2e-${RUN}-${extra}`,
@@ -62,7 +66,7 @@ afterAll(async () => {
 
 describe("IMAI 一键验收（自建聊天层契约）", () => {
   it("[0] 服务健康：后端 8000 可达", async () => {
-    const r = await api("/api/tasks");
+    const r = await api("/api/tasks", undefined, "GET", authHeaders());
     expect(r).toBeDefined();
   });
 
@@ -100,7 +104,7 @@ describe("IMAI 一键验收（自建聊天层契约）", () => {
   it("[3] confirm 流转", async () => {
     const tid = taskRow!.id;
     const before = taskRow!.status;
-    await api(`/api/tasks/${tid}/confirm`, {}, "POST");
+    await api(`/api/tasks/${tid}/confirm`, {}, "POST", authHeaders());
     const after = await db<{ status: string }[]>("SELECT status FROM task WHERE id=$1", [tid]);
     expect(after[0].status).toBe("confirmed");
     expect(before).not.toBe("confirmed"); // 翻转发生
@@ -146,7 +150,7 @@ describe("IMAI 一键验收（自建聊天层契约）", () => {
   });
 
   it("[5] 看板接口返回", async () => {
-    const board = await api("/api/tasks");
+    const board = await api("/api/tasks", undefined, "GET", authHeaders());
     expect(["object", "array"]).toContain(typeof board);
   });
 });
