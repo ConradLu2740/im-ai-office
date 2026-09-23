@@ -24,5 +24,7 @@ export const authRoutes = new Hono()
   .get("/api/auth/me", async (c) => {
     const u = await sessionUser(bearerToken(c.req.header("Authorization"), c.req.header("x-imai-token")));
     if (!u) return c.json({ ok: false, error: "unauthorized" }, 401);
-    return c.json({ ok: true, user_id: u.id, display_name: u.displayName, role: u.role });
+    // 角色展示与鉴权同源：读 role 表（app_user.role 是无写入方的死列，曾导致 admin 显示 member）
+    const { getRole } = await import("../rbac.js");
+    return c.json({ ok: true, user_id: u.id, display_name: u.displayName, role: await getRole(u.id) });
   });

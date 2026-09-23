@@ -294,6 +294,22 @@ describe("P0 · 剩余端点鉴权补齐（C1：messages/rbac/memory）", () => 
   });
 });
 
+describe("P1 · /api/auth/me 角色展示与鉴权同源（role 表）", () => {
+  it("role 表授 group_admin 后，/api/auth/me 显示 group_admin（原读 app_user.role 死列，永远 member）", async () => {
+    const token = await mkSession("user-me-1", "我");
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-me-1','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    const r = await req("/api/auth/me", "GET", undefined, { Authorization: `Bearer ${token}` });
+    expect(r.body.ok).toBe(true);
+    expect(r.body.role).toBe("group_admin");
+  });
+
+  it("未授角色显示 member", async () => {
+    const token = await mkSession("user-me-2", "普通人");
+    const r = await req("/api/auth/me", "GET", undefined, { Authorization: `Bearer ${token}` });
+    expect(r.body.role).toBe("member");
+  });
+});
+
 describe("P1 · resolve 越权与任务复活修复（I1）", () => {
   it("body.sender_id 被忽略、强制本人：他人待确认任务不可被解析", async () => {
     await query(
