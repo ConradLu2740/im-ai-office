@@ -8,7 +8,7 @@ export const rbacRoutes = new Hono()
 
   .post("/api/role/set", async (c) => {
   const denied = checkAdmin(c);
-  if (denied) return c.json(denied);
+  if (denied) return c.json(denied, 401);
   const body = await c.req.json().catch(() => ({}));
   try {
     await setRole(String(body.oim_user_id ?? ""), String(body.role ?? ""));
@@ -31,7 +31,7 @@ export const rbacRoutes = new Hono()
 })
   .post("/api/approvals/:id/decide", async (c) => {
   const denied = checkAdmin(c);
-  if (denied) return c.json(denied);
+  if (denied) return c.json(denied, 401);
   const id = Number(c.req.param("id"));
   const body = await c.req.json().catch(() => ({}));
   const { row, detail } = await decideApproval(id, Boolean(body.approved), String(body.decided_by ?? "group_admin"));

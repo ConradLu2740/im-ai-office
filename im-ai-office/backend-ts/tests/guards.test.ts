@@ -8,9 +8,9 @@ import { resolve } from "../src/pipeline.js";
 // G 系关键守卫移植（test_g11/g12/g3/g4 精选）：TS 后端的核心不变量
 // P3：发送入口改为 /api/messages/send（内联 AI 闸门），/callback 与 /openim/* 已删除
 
-async function request(path: string, method: string, body?: unknown, token?: string): Promise<Record<string, unknown>> {
+async function request(path: string, method: string, body?: unknown, token?: string, extra: Record<string, string> = {}): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...extra };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await app.request(path, {
     method, headers,
@@ -19,7 +19,10 @@ async function request(path: string, method: string, body?: unknown, token?: str
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-const post = (path: string, body?: unknown, token?: string) => request(path, "POST", body, token);
+const post = (path: string, body?: unknown, token?: string, extra?: Record<string, string>) => request(path, "POST", body, token, extra);
+
+// P0 起管理端点 fail-closed：测试环境令牌见 vitest.config.ts
+const ADMIN = { "X-IMAI-Admin-Token": "test-admin-token" };
 
 async function get(path: string): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
@@ -124,7 +127,7 @@ describe("G12 · 完成回流 + G4 观测", () => {
 
 describe("G3 · RBAC 与确认流", () => {
   it("角色往返 + 高风险审批 + 完成闭环", async () => {
-    const r = await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" });
+    const r = await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" }, undefined, ADMIN);
     expect(r.ok).toBe(true);
     expect((await get("/api/role/user001")).role).toBe("group_admin");
     expect((await post("/api/role/set", { oim_user_id: "user001", role: "superadmin" })).ok).toBe(false);
@@ -135,7 +138,7 @@ describe("G3 · RBAC 与确认流", () => {
     expect(pending.length).toBe(1);
     // admin 批复 → approved
     const aid = pending[0].id;
-    const d = await post(`/api/approvals/${aid}/decide`, { approved: true, decided_by: "imAdmin" });
+    const d = await post(`/api/approvals/${aid}/decide`, { approved: true, decided_by: "imAdmin" }, undefined, ADMIN);
     expect((d.approval as Record<string, unknown>).status).toBe("approved");
     // 识别 → 确认流（经新发送端点）
     makeFakeLlm([{ match: "我来写周报", intent: makeIntent({ is_task: true, confidence: "high",
@@ -271,7 +274,7 @@ describe("G16 术语接口鉴权", () => {
     const rDelUser002 = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user002);
     expect(rDelUser002.ok).toBe(false);
     expect(rDelUser002.error).toBe("forbidden");
-    await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" });
+    await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" }, undefined, ADMIN);
     const rDelAdmin = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user001);
     expect(rDelAdmin.ok).toBe(true);
   });

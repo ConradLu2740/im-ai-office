@@ -20,7 +20,7 @@ export const config = {
   openimAdminToken: env("OPENIM_ADMIN_TOKEN", ""),
   openimSecret: env("OPENIM_SECRET", "openIM123"),
   authToken: env("AUTH_TOKEN", ""),
-  // 三方校验（deps 哲学：env 未设置=放行+一次性 WARN）
+  // 三方校验（P0 起 fail-closed：env 未设置=拒绝，见 deps.ts）
   adminToken: env("IMAI_ADMIN_TOKEN", ""),
   loginPassword: env("IMAI_LOGIN_PASSWORD", ""),
   // 提醒调度（0=关闭）
