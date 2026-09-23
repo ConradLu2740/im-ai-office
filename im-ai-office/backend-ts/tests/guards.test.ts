@@ -89,11 +89,12 @@ describe("G12 · 完成回流 + G4 观测", () => {
 
   it("complete 端点：confirmed → done + audit；二次拒绝；done 不触发提醒档位", async () => {
     const tid = await mkTask("出季度数据报表");
-    const r = await post(`/api/tasks/${tid}/complete`, { actor: "user001" });
+    const token = await mkSession("user001", "user001");
+    const r = await post(`/api/tasks/${tid}/complete`, { actor: "user001" }, token);
     expect(r.ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [tid]))!.status).toBe("done");
     expect(Number((await one("SELECT COUNT(*)::int AS n FROM audit WHERE action='task_completed'"))!.n)).toBeGreaterThanOrEqual(1);
-    expect((await post(`/api/tasks/${tid}/complete`, { actor: "user001" })).ok).toBe(false);
+    expect((await post(`/api/tasks/${tid}/complete`, { actor: "user001" }, token)).ok).toBe(false);
     const { judgeTiers } = await import("../src/reminder.js");
     expect(judgeTiers({ status: "done", assignee: "user001", deadline: "周五",
       deadline_at: "2026-08-01 10:00", created_at: "2026-08-01 09:00" })).toEqual([]);
@@ -147,7 +148,7 @@ describe("G3 · RBAC 与确认流", () => {
     const ai = await post("/api/messages/send", { text: "我来写周报",
       conv_id: "sg_g3", client_msg_id: "g3-cmid-1" }, token);
     const taskId = ((ai.ai as Record<string, unknown>).task as Record<string, unknown>).taskId as number;
-    expect((await post(`/api/tasks/${taskId}/confirm`, {})).ok).toBe(true);
+    expect((await post(`/api/tasks/${taskId}/confirm`, {}, token)).ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("confirmed");
   });
 });
@@ -196,7 +197,7 @@ describe("G14 · 驳回原因选择器", () => {
     const ai = await post("/api/messages/send", { text: "我来交周报",
       conv_id: "sg_g14", client_msg_id: "g14-cmid-1" }, token);
     const taskId = ((ai.ai as Record<string, unknown>).task as Record<string, unknown>).taskId as number;
-    const r = await post(`/api/tasks/${taskId}/reject`, { reason: "时间不对" });
+    const r = await post(`/api/tasks/${taskId}/reject`, { reason: "时间不对" }, token);
     expect(r.ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("rejected");
     const aud = await one<{ detail: string }>(
@@ -217,17 +218,18 @@ describe("G15 · 任务状态变化补发 task_status SSE 事件", () => {
     const pendingId = await mkTask("G15待确认任务", "pending_confirmation");
     const confirmedId = await mkTask("G15已确认任务A", "confirmed");
     const confirmedId2 = await mkTask("G15已确认任务B", "confirmed");
+    const token = await mkSession("user001", "G15用户");
 
     const events: string[] = [];
     const { subscribe, unsubscribe } = await import("../src/sse.js");
     const sink = (line: string) => events.push(line);
     subscribe(sink);
     try {
-      const r1 = await post(`/api/tasks/${pendingId}/confirm`, {});
+      const r1 = await post(`/api/tasks/${pendingId}/confirm`, {}, token);
       expect(r1.ok).toBe(true);
-      const r2 = await post(`/api/tasks/${confirmedId}/reject`, { reason: "不需要建任务" });
+      const r2 = await post(`/api/tasks/${confirmedId}/reject`, { reason: "不需要建任务" }, token);
       expect(r2.ok).toBe(true);
-      const r3 = await request(`/api/tasks/${confirmedId2}`, "PATCH", { assignee: "李娜" });
+      const r3 = await request(`/api/tasks/${confirmedId2}`, "PATCH", { assignee: "李娜" }, token);
       expect(r3.ok).toBe(true);
 
       const statusEvents = events

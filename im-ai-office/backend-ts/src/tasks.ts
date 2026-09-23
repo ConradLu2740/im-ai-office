@@ -10,7 +10,7 @@ export const CANCELLED = "cancelled";
 
 const touch = { updatedAt: sql`NOW()` };
 
-export async function confirmTask(taskId: number, assignee?: string | null, _deadline?: string | null): Promise<boolean> {
+export async function confirmTask(taskId: number, assignee?: string | null, _deadline?: string | null, actor = "user"): Promise<boolean> {
   const t = await getTaskDict(taskId);
   if (!t) return false;
   if (assignee !== undefined && assignee !== null) {
@@ -18,16 +18,16 @@ export async function confirmTask(taskId: number, assignee?: string | null, _dea
   } else {
     await db.update(task).set({ status: "confirmed", ...touch }).where(eq(task.id, taskId));
   }
-  await auditLog("user", "confirm", { taskId });
+  await auditLog(actor, "confirm", { taskId });
   fanout("task_status", { taskId, status: "confirmed" });
   return true;
 }
 
-export async function rejectTask(taskId: number, reason?: string | null): Promise<boolean> {
+export async function rejectTask(taskId: number, reason?: string | null, actor = "user"): Promise<boolean> {
   const t = await getTaskDict(taskId);
   if (!t) return false;
   await db.update(task).set({ status: "rejected", ...touch }).where(eq(task.id, taskId));
-  await auditLog("user", "reject", { taskId, reason: reason ?? "" });
+  await auditLog(actor, "reject", { taskId, reason: reason ?? "" });
   // S4/M4：修正信号沉淀——驳回理由指明正确负责人时，更新人称别名
   if (reason) {
     const { memorizeRejectSignal } = await import("./memory.js");
@@ -49,7 +49,7 @@ export async function completeTask(taskId: number, actor = "user"): Promise<bool
 
 /** 迭代2 B1：已确认任务修改（改负责人/改期/取消）。返回 {task?, err?}，语义 1:1 对齐 Python。 */
 export async function updateTask(
-  taskId: number, assignee?: string | null, deadline?: string | null, cancel = false
+  taskId: number, assignee?: string | null, deadline?: string | null, cancel = false, actor = "user"
 ): Promise<{ task?: TaskRow; err?: string }> {
   const row = await getTaskDict(taskId);
   if (!row) return { err: "task_not_found" };
@@ -68,7 +68,7 @@ export async function updateTask(
     await db.update(task).set({ status: CANCELLED, ...touch }).where(eq(task.id, taskId));
     changes["status"] = [row.status, CANCELLED];
   }
-  await auditLog("user", "task_update", { taskId, changes });
+  await auditLog(actor, "task_update", { taskId, changes });
   const updated = await getTaskDict(taskId);
   fanout("task_status", { taskId, status: updated!.status ?? "" });
   return { task: updated! };
