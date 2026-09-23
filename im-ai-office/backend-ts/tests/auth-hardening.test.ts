@@ -83,6 +83,45 @@ describe("P1 · 任务状态流转原子性（tasks.ts 核心）", () => {
   });
 });
 
+describe("P0 · misc 端点鉴权与归属收敛（SSE/私信/审计）", () => {
+  it("SSE 流：无 token → 401；?token= 有效 token → 200", async () => {
+    const { app } = await import("../src/app.js");
+    const noAuth = await app.request("/api/events/stream");
+    expect(noAuth.status).toBe(401);
+    const token = await mkSession("user-t3-sse", "SSE用户");
+    const ok = await app.request(`/api/events/stream?token=${token}`);
+    expect(ok.status).toBe(200);
+    await ok.body?.cancel();
+  });
+
+  it("ai_dm：member 只能看/已读自己的私信；admin 可查他人", async () => {
+    await query("INSERT INTO ai_dm(sender_id, direction, content) VALUES('user-t3-a','in','A的私信'),('user-t3-b','in','B的私信')");
+    const tokenA = await mkSession("user-t3-a", "甲");
+    const rA = await req("/api/ai_dm", "GET", undefined, { Authorization: `Bearer ${tokenA}` });
+    const msgsA = rA.body.messages as Array<{ senderId: string }>;
+    expect(msgsA.length).toBeGreaterThanOrEqual(1);
+    expect(msgsA.every((m) => m.senderId === "user-t3-a")).toBe(true);
+    // member 指定他人 sender_id → 仍收敛到自己
+    const rA2 = await req("/api/ai_dm?sender_id=user-t3-b", "GET", undefined, { Authorization: `Bearer ${tokenA}` });
+    expect((rA2.body.messages as Array<{ senderId: string }>).every((m) => m.senderId === "user-t3-a")).toBe(true);
+    // admin 可查他人
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-t3-a','group_admin')");
+    const rAdmin = await req("/api/ai_dm?sender_id=user-t3-b", "GET", undefined, { Authorization: `Bearer ${tokenA}` });
+    expect((rAdmin.body.messages as Array<{ senderId: string }>).some((m) => m.senderId === "user-t3-b")).toBe(true);
+  });
+
+  it("audit：member 403 / admin 200；summary 与 stats 要求登录", async () => {
+    const token = await mkSession("user-t3-c", "丙");
+    const auditMember = await req("/api/audit", "GET", undefined, { Authorization: `Bearer ${token}` });
+    expect(auditMember.status).toBe(403);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-t3-c','group_admin')");
+    const auditAdmin = await req("/api/audit", "GET", undefined, { Authorization: `Bearer ${token}` });
+    expect(auditAdmin.status).toBe(200);
+    expect((await req("/api/summary/daily", "GET")).status).toBe(401);
+    expect((await req("/api/stats/quality", "GET")).status).toBe(401);
+  });
+});
+
 describe("P0 · 管理端点 fail-closed（checkAdmin）", () => {
   it("无 token → 401 拒绝；正确 token → 放行；错 token → 401 拒绝", async () => {
     const noTok = await req("/api/role/set", "POST", { oim_user_id: "u-fc-1", role: "member" });

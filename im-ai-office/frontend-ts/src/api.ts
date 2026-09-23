@@ -38,6 +38,11 @@ export function apiSetSession(user: string | null, token: string | null): void {
   }
 }
 
+/** 当前会话 token（SSE ?token= 等无法带 header 的场景用） */
+export function apiToken(): string | null {
+  return currentToken;
+}
+
 function authHeaders(): Record<string, string> {
   return currentToken ? { "Authorization": `Bearer ${currentToken}` } : {};
 }

@@ -1,7 +1,7 @@
 // 类型已全量收紧（2026-09-03）：移除 @ts-nocheck，DOM 窄化/unknown 收敛完成。
 // API 层已摘出至 api.ts（无 @ts-nocheck，Hono RPC 契约全检）。
 
-import { api, apiSetSession, getTauriInvoke, type ApiResult } from "./api.js";
+import { api, apiSetSession, apiToken, getTauriInvoke, type ApiResult } from "./api.js";
 
 window.onerror = function (msg: string | Event, src?: string, line?: number) {
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
@@ -1228,7 +1228,9 @@ let _sseDiagTimer: number | null = null;
 function initSSE() {
   if (!window.EventSource || esAI) return;
   try {
-    esAI = new EventSource(API_BASE + "/api/events/stream");
+    // P0：SSE 端点已要求登录；EventSource 不能带 header → token 走 ?token=（见后端 misc.ts）
+    const tok = apiToken();
+    esAI = new EventSource(API_BASE + "/api/events/stream" + (tok ? "?token=" + encodeURIComponent(tok) : ""));
     esAI.onopen = () => {
       setSDKStatus("实时通道已连接", true);
       _sseRetryMs = 0;

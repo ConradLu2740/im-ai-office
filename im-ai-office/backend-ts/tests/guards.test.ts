@@ -24,9 +24,9 @@ const post = (path: string, body?: unknown, token?: string, extra?: Record<strin
 // P0 起管理端点 fail-closed：测试环境令牌见 vitest.config.ts
 const ADMIN = { "X-IMAI-Admin-Token": "test-admin-token" };
 
-async function get(path: string): Promise<Record<string, unknown>> {
+async function get(path: string, token?: string): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
-  const res = await app.request(path);
+  const res = await app.request(path, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
   return res.json() as Promise<Record<string, unknown>>;
 }
 
@@ -166,7 +166,8 @@ describe("G13 · 质量统计口径（真实口径排除派生/测试流量）",
     await query("INSERT INTO audit(actor,action,detail,ts) VALUES('g13','ai_processed',$1,NOW())",
       [JSON.stringify({ msgId: "g13-2", action: "task_created", taskId: Number(mined!.id), latency_ms: 60000, source: "sdk_message" })]);
 
-    const rep = await get("/api/stats/quality?days=7");
+    const statsToken = await mkSession("user-g13", "G13用户");
+    const rep = await get("/api/stats/quality?days=7", statsToken);
     expect(rep.ok).toBe(true);
     // auditLog 必须写 ts（漏写 → 新行被统计窗口静默过滤，2026-09-03 实证）
     const { auditLog } = await import("../src/repos.js");
