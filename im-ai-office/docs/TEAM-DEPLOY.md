@@ -23,20 +23,20 @@ npm run build:frontend   # 产物落 web/（后端静态直出，同源部署）
 
 ## 3. 环境变量（.env 放 monorepo 根目录）
 
-**必填**（P0 起 fail-closed：不设置 = 管理端点直接拒绝，不再静默放行）：
+**必填**（就两个，其余都有默认值）：
 
 ```ini
 DATABASE_URL=postgres://imai:<强口令>@127.0.0.1:5432/imai
 LLM_API_KEY=<DeepSeek/OpenAI 兼容 key>
-AUTH_TOKEN=<回调令牌，随机长串>
-IMAI_ADMIN_TOKEN=<管理令牌，随机长串>
-IMAI_LOGIN_PASSWORD=<登录口令>
 ```
 
 可选：`LLM_BASE`/`LLM_MODEL`（默认 DeepSeek）、`IMAI_TS_PORT`（默认 8000）、
 `IMAI_REMIND_INTERVAL_SEC`（默认 60）、`IMAI_DIGEST_TIME`（默认 18:00）。
 
-> 仓库里的 `.env.example` 仍有 Python 时代残留（Redis 等），忽略；以本节为准。
+> 登录认证走 per-user scrypt 口令 + session token（`backend-ts/src/auth.ts`），
+> 账号一律 CLI 建（见 §4），没有也不再用 `AUTH_TOKEN`/`IMAI_ADMIN_TOKEN`/
+> `IMAI_LOGIN_PASSWORD` 这类全局令牌 env（P0 终审已删除，`.env.example` 里的
+> Python 时代残留一并忽略）。
 
 ## 4. 初始化
 
@@ -51,12 +51,6 @@ cd backend-ts && npx drizzle-kit migrate && cd ..
 cd backend-ts
 npx tsx scripts/set-password.mts admin <初始口令> admin "管理员"
 cd ..
-
-# 4) 赋予 group_admin 角色（需要 IMAI_ADMIN_TOKEN）
-curl -X POST http://127.0.0.1:8000/api/role/set \
-  -H "X-IMAI-Admin-Token: <IMAI_ADMIN_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"oim_user_id":"admin","role":"group_admin"}'
 ```
 
 后续成员账号：重复 `set-password.mts <username> <password> <user_id> "<显示名>"` 即可（默认 member）。
@@ -73,6 +67,24 @@ cd backend-ts && npm start
 pm2 start "node dist/index.js" --name imai-backend --cwd backend-ts
 ```
 
+## 5b. 授予管理员角色（服务起来之后）
+
+管理端点（角色设置/审批）现在是「登录 + group_admin」双重要求。用刚才建的
+admin 账号登录拿 session token，再调角色接口：
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<初始口令>"}' | node -pe "JSON.parse(require('fs').readFileSync(0)).token")
+
+curl -X POST http://127.0.0.1:8000/api/role/set \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"oim_user_id":"admin","role":"group_admin"}'
+```
+
+之后 RBAC 面板/审批按钮在 UI 里直接可用（前端带的是同一个 session token）。
+
 ## 6. 访问方式（重要）
 
 **必须经反向代理到 80/443**（Nginx/Caddy/Tailscale Funnel 均可），原因：
@@ -86,7 +98,7 @@ pm2 start "node dist/index.js" --name imai-backend --cwd backend-ts
 ## 7. 安全基线（P0 加固后）
 
 - 所有业务端点要求登录（session token，Bearer 头）；未登录 401
-- 管理端点（角色/审批）需 `IMAI_ADMIN_TOKEN`，未配置即拒绝（fail-closed）
+- 管理端点（角色设置/审批决定）= 登录 + group_admin 角色；member 403
 - SSE（`/api/events/stream`）接受 `?token=` 查询参数（EventSource 无法带 header）——
   仅限内网/反代场景使用，公网部署需换 fetch 流式方案
 - 私信（ai_dm）只能看自己的；admin 可查他人

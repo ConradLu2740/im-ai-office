@@ -10,6 +10,8 @@ import { getRole } from "../rbac.js";
 export const memoryRoutes = new Hono()
 
   .get("/api/terms", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   return c.json({ ok: true, terms: await listTerms() });
 })
   .post("/api/term/add", async (c) => {
@@ -47,15 +49,21 @@ export const memoryRoutes = new Hono()
   return c.json({ ok: true, term });
 })
   .post("/api/grp/meta", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
   await setGrpMeta(String(body.oim_group_id ?? ""), body.intro ?? undefined,
     body.ai_enabled === undefined ? undefined : Number(body.ai_enabled));
   return c.json({ ok: true, meta: await getGrpMeta(String(body.oim_group_id ?? "")) });
 })
   .get("/api/grp/meta/:group_id", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   return c.json({ ok: true, meta: await getGrpMeta(c.req.param("group_id")) });
 })
   .get("/api/memory", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const groupId = c.req.query("group_id");
   return c.json({
     ok: true,

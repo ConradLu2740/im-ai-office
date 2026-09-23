@@ -21,9 +21,6 @@ async function request(path: string, method: string, body?: unknown, token?: str
 
 const post = (path: string, body?: unknown, token?: string, extra?: Record<string, string>) => request(path, "POST", body, token, extra);
 
-// P0 起管理端点 fail-closed：测试环境令牌见 vitest.config.ts
-const ADMIN = { "X-IMAI-Admin-Token": "test-admin-token" };
-
 async function get(path: string, token?: string): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
   const res = await app.request(path, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
@@ -128,18 +125,22 @@ describe("G12 · 完成回流 + G4 观测", () => {
 
 describe("G3 · RBAC 与确认流", () => {
   it("角色往返 + 高风险审批 + 完成闭环", async () => {
-    const r = await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" }, undefined, ADMIN);
+    // bootstrap：直接 SQL 授 superadmin（role/set 本身需要 admin session）
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user001','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    const adminTok = await mkSession("user001", "user001");
+    const r = await post("/api/role/set", { oim_user_id: "user003", role: "group_admin" }, adminTok);
     expect(r.ok).toBe(true);
-    expect((await get("/api/role/user001")).role).toBe("group_admin");
-    expect((await post("/api/role/set", { oim_user_id: "user001", role: "superadmin" })).ok).toBe(false);
-    // member 高风险 → pending
-    const n = await post("/api/notify/request", { group_id: "sg_001", text: "今晚 8 点发布", actor: "sim_user" });
+    expect((await get("/api/role/user003", adminTok)).role).toBe("group_admin");
+    expect((await post("/api/role/set", { oim_user_id: "user003", role: "superadmin" }, adminTok)).ok).toBe(false);
+    // member 高风险 → pending（actor 强制取会话身份，不信 body）
+    const memberTok = await mkSession("user002", "李四");
+    const n = await post("/api/notify/request", { group_id: "sg_001", text: "今晚 8 点发布" }, memberTok);
     expect(n.direct).toBe(false);
-    const pending = (await get("/api/approvals?status=pending")).approvals as Array<Record<string, unknown>>;
+    const pending = (await get("/api/approvals?status=pending", adminTok)).approvals as Array<Record<string, unknown>>;
     expect(pending.length).toBe(1);
     // admin 批复 → approved
     const aid = pending[0].id;
-    const d = await post(`/api/approvals/${aid}/decide`, { approved: true, decided_by: "imAdmin" }, undefined, ADMIN);
+    const d = await post(`/api/approvals/${aid}/decide`, { approved: true }, adminTok);
     expect((d.approval as Record<string, unknown>).status).toBe("approved");
     // 识别 → 确认流（经新发送端点）
     makeFakeLlm([{ match: "我来写周报", intent: makeIntent({ is_task: true, confidence: "high",
@@ -277,7 +278,7 @@ describe("G16 术语接口鉴权", () => {
     const rDelUser002 = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user002);
     expect(rDelUser002.ok).toBe(false);
     expect(rDelUser002.error).toBe("forbidden");
-    await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" }, undefined, ADMIN);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user001','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
     const rDelAdmin = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user001);
     expect(rDelAdmin.ok).toBe(true);
   });

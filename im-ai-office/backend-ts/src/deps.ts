@@ -1,5 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
-import { config, warnOnce } from "./config.js";
 import { sessionUser, type SessionUser } from "./auth.js";
 import type { Context } from "hono";
 
@@ -10,43 +8,16 @@ export async function requireUser(c: Context): Promise<SessionUser | null> {
   return sessionUser(header?.startsWith("Bearer ") ? header.slice(7).trim() : alt ?? null);
 }
 
-// ============ 认证依赖（deps.py 的 TS 版；P0 加固：env 未设置=拒绝，fail-closed） ============
-
-/** 恒时比较（先比长度，避免 timingSafeEqual 对不等长输入抛错） */
-function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
-}
-
-export function checkAdmin(c: Context): Record<string, unknown> | null {
-  const expected = config.adminToken;
-  if (!expected) {
-    warnOnce("admin", "IMAI_ADMIN_TOKEN 未设置：管理端点已拒绝（fail-closed；团队部署必须显式配置）");
-    return { ok: false, error: "admin token not configured" };
-  }
-  if (safeEqual(c.req.header("X-IMAI-Admin-Token") ?? "", expected)) return null;
-  return { ok: false, error: "admin token required" };
-}
-
-export function checkCallbackToken(c: Context): Record<string, unknown> | null {
-  const expected = config.authToken;
-  if (!expected) {
-    warnOnce("callback", "AUTH_TOKEN 未设置：回调已拒绝（fail-closed；团队部署必须显式配置）");
-    return { ok: false, error: "callback token not configured" };
-  }
-  const header = c.req.header("X-IMAI-Token") || "";
-  const qp = (c.req.query("token") || "").split("/")[0];
-  if (safeEqual(header, expected) || safeEqual(qp, expected)) return null;
-  return { ok: false, error: "callback token required" };
-}
-
-export function checkLoginPassword(body: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
-  const expected = config.loginPassword;
-  if (!expected) {
-    warnOnce("login", "IMAI_LOGIN_PASSWORD 未设置：登录已拒绝（fail-closed；团队部署必须显式配置）");
-    return { ok: false, error: "login password not configured" };
-  }
-  if (safeEqual(String((body || {})["password"] ?? ""), expected)) return null;
-  return { ok: false, error: "password required" };
+/**
+ * 管理端点门（P0 终审修复）：登录 + group_admin 角色。
+ * 原 checkAdmin（X-IMAI-Admin-Token 头 + env fail-closed）有两个问题：
+ * 前端只会带 Bearer，RBAC 面板必然 401；且 token 与角色两套体系分裂。
+ * 收敛为与 /api/audit、term delete 一致的模式：session + role。
+ */
+export async function requireAdmin(c: Context): Promise<{ user: SessionUser | null; denied: Response | null }> {
+  const user = await requireUser(c);
+  if (!user) return { user: null, denied: c.json({ ok: false, error: "unauthorized" }, 401) };
+  const { getRole } = await import("./rbac.js");
+  if ((await getRole(user.id)) !== "group_admin") return { user: null, denied: c.json({ ok: false, error: "forbidden" }, 403) };
+  return { user, denied: null };
 }

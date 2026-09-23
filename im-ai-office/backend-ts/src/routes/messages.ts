@@ -1,23 +1,17 @@
 import { Hono } from "hono";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/drizzle.js";
-import { message, session, userGroup, userLastRead } from "../db/schema.js";
+import { message, userGroup, userLastRead } from "../db/schema.js";
 import { messageAdd } from "../repos.js";
 import { auditLog } from "../repos.js";
 import { fanout } from "../sse.js";
 import { processMessage, auditAiProcessed } from "../pipeline.js";
 import { executeAiActions } from "../actions.js";
-import { sessionUser, type SessionUser } from "../auth.js";
+import { requireUser } from "../deps.js";
 
 // ============ 自建聊天层路由（P3；Spec §4.2） ============
 // 发送端点内联 AI 入口（闸门平移）：落库（唯一约束幂等）→ processMessage → fanout
-// SSE 事件 payload 统一携带 DB id + client_msg_id（去重键统一，评审 D3）
-
-async function requireUser(c: import("hono").Context): Promise<SessionUser | null> {
-  const header = c.req.header("Authorization");
-  const alt = c.req.header("x-imai-token");
-  return sessionUser(header?.startsWith("Bearer ") ? header.slice(7).trim() : alt ?? null);
-}
+// SSE 事件 payload 统一携带 DB id + client_msg_id（去主键统一，评审 D3）
 
 export const messagesRoutes = new Hono()
 
@@ -103,13 +97,16 @@ export const messagesRoutes = new Hono()
   })
 
   // 会话历史（现有 messageList 语义保留在此别名，便于前端统一走 /api/messages/*）
+  // C1 修复：必须登录（原匿名可读，且缺 conv_id 时 WHERE TRUE 裸全表）
   .get("/api/messages/history", async (c) => {
-    const convId = c.req.query("conv_id");
-    const rows = await db.select().from(message)
-      .where(convId ? eq(message.convId, convId) : sql`TRUE`)
-      .orderBy(message.id);
-    return c.json({ ok: true, messages: rows });
-  })
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  const convId = c.req.query("conv_id");
+  const rows = await db.select().from(message)
+    .where(convId ? eq(message.convId, convId) : sql`TRUE`)
+    .orderBy(message.id);
+  return c.json({ ok: true, messages: rows });
+})
 
   // 未读计数：以 user_group（与 /api/conversations 同源）为主表，LEFT JOIN 该用户水位；
   // 无水位行的群（从未打开）也计入，未读 = 整群消息数（G17）
@@ -127,6 +124,3 @@ export const messagesRoutes = new Hono()
       ));
     return c.json({ ok: true, unread: rows });
   });
-
-// session 表引用保留（会话校验走 auth.sessionUser）；防未来误删
-void session;

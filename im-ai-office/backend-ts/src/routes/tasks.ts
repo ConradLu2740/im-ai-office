@@ -170,8 +170,9 @@ export const taskRoutes = new Hono()
   if (taskId !== null && (!Number.isInteger(taskId) || taskId <= 0)) {
     return c.json({ ok: false, error: "invalid task_id" }, 400);
   }
+  // I1 修复：sender_id 强制取会话身份（原信 body，可解析他人的待确认任务）
   const { resolveTaskByChoice } = await import("../aiDm.js");
-  const r = await resolveTaskByChoice(String(body.sender_id ?? ""), String(body.choice ?? ""), taskId);
+  const r = await resolveTaskByChoice(user.id, String(body.choice ?? ""), taskId);
   return c.json(r);
 })
 

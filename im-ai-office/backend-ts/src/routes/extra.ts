@@ -5,12 +5,12 @@ import { requireUser } from "../deps.js";
 import { getRole } from "../rbac.js";
 import { errText } from "../errtext.js";
 
-/** 登录 + admin 双重门（LLM 燃烧端点用）：返回 user 或直接给出 401/403 响应 */
-async function adminGate(c: import("hono").Context) {
+/** 登录 + admin 双重门（LLM 燃烧端点用）：返回 { user, denied }，denied 非空即返回它 */
+async function adminGate(c: import("hono").Context): Promise<{ user: import("../auth.js").SessionUser | null; denied: Response | null }> {
   const user = await requireUser(c);
-  if (!user) return { denied: c.json({ ok: false, error: "unauthorized" }, 401) };
-  if ((await getRole(user.id)) !== "group_admin") return { denied: c.json({ ok: false, error: "forbidden" }, 403) };
-  return { user };
+  if (!user) return { user: null, denied: c.json({ ok: false, error: "unauthorized" }, 401) };
+  if ((await getRole(user.id)) !== "group_admin") return { user: null, denied: c.json({ ok: false, error: "forbidden" }, 403) };
+  return { user, denied: null };
 }
 
 export const extraRoutes = new Hono()

@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { mkSession, makeFakeLlm, makeIntent } from "./setup.js";
 import { query, one } from "../src/db.js";
 
-// P0 安全加固：管理端点 fail-closed + 任务端点强制登录
-// 测试环境姿态见 vitest.config.ts：IMAI_ADMIN_TOKEN="test-admin-token"
+// P0 安全加固：全端点登录 + 管理端点 登录+group_admin（requireAdmin）
+// 测试环境姿态见 vitest.config.ts
 
 async function req(
   path: string, method: string, body?: unknown, headers: Record<string, string> = {}
@@ -16,8 +16,6 @@ async function req(
   });
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
-
-const ADMIN = { "X-IMAI-Admin-Token": "test-admin-token" };
 
 describe("P0 · 任务端点鉴权（routes/tasks.ts）", () => {
   it("confirm/reject/complete 无 token → 401；NaN task_id → 400；带 token 正常流转", async () => {
@@ -95,7 +93,10 @@ describe("P0 · errText 单元（错误消息提取）", () => {
 
 describe("P0 · 错误消息不回削（errText）", () => {
   it("非法角色的报错是完整 message，不是 Valueinvalid…", async () => {
-    const r = await req("/api/role/set", "POST", { oim_user_id: "u-err", role: "superadmin" }, ADMIN);
+    const admin = await mkSession("user-err-admin", "err管理员");
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-err-admin','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    const r = await req("/api/role/set", "POST", { oim_user_id: "u-err", role: "superadmin" },
+      { Authorization: `Bearer ${admin}` });
     expect(r.body.ok).toBe(false);
     expect(r.body.error).toBe("invalid role: superadmin");
   });
@@ -249,24 +250,71 @@ describe("P0 · misc 端点鉴权与归属收敛（SSE/私信/审计）", () => 
   });
 });
 
-describe("P0 · 管理端点 fail-closed（checkAdmin）", () => {
-  it("无 token → 401 拒绝；正确 token → 放行；错 token → 401 拒绝", async () => {
-    const noTok = await req("/api/role/set", "POST", { oim_user_id: "u-fc-1", role: "member" });
-    expect(noTok.status).toBe(401);
-    expect(noTok.body.ok).toBe(false);
-
-    const withTok = await req("/api/role/set", "POST", { oim_user_id: "u-fc-1", role: "member" }, ADMIN);
-    expect(withTok.body.ok).toBe(true);
-
-    const wrongTok = await req("/api/role/set", "POST", { oim_user_id: "u-fc-1", role: "member" },
-      { "X-IMAI-Admin-Token": "wrong-token-value" });
-    expect(wrongTok.status).toBe(401);
-    expect(wrongTok.body.ok).toBe(false);
+describe("P0 · 管理端点 requireAdmin（登录 + group_admin，I2 修复）", () => {
+  it("无 session → 401；member → 403；group_admin session → 放行", async () => {
+    const member = await mkSession("user-ra-m", "成员");
+    const noAuth = await req("/api/role/set", "POST", { oim_user_id: "u-ra-1", role: "member" });
+    expect(noAuth.status).toBe(401);
+    const asMember = await req("/api/role/set", "POST", { oim_user_id: "u-ra-1", role: "member" },
+      { Authorization: `Bearer ${member}` });
+    expect(asMember.status).toBe(403);
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user-ra-m','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    const asAdmin = await req("/api/role/set", "POST", { oim_user_id: "u-ra-2", role: "member" },
+      { Authorization: `Bearer ${member}` });
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body.ok).toBe(true);
   });
 
-  it("审批决定端点同样 fail-closed", async () => {
-    const noTok = await req("/api/approvals/999/decide", "POST", { approved: true, decided_by: "imAdmin" });
-    expect(noTok.status).toBe(401);
-    expect(noTok.body.ok).toBe(false);
+  it("审批决定端点同样 requireAdmin（member 403）", async () => {
+    const member = await mkSession("user-ra-a", "成员");
+    const asMember = await req("/api/approvals/999/decide", "POST", { approved: true, decided_by: "imAdmin" },
+      { Authorization: `Bearer ${member}` });
+    expect(asMember.status).toBe(403);
+    expect(asMember.body.ok).toBe(false);
+  });
+});
+
+describe("P0 · 剩余端点鉴权补齐（C1：messages/rbac/memory）", () => {
+  it("history/grp-meta/terms/memory/roles/role/approvals/notify 无 token → 401", async () => {
+    for (const [path, method] of [
+      ["/api/messages/history", "GET"], ["/api/grp/meta", "POST"], ["/api/grp/meta/sg_001", "GET"],
+      ["/api/terms", "GET"], ["/api/memory", "GET"], ["/api/roles", "GET"],
+      ["/api/role/user001", "GET"], ["/api/approvals", "GET"], ["/api/notify/request", "POST"],
+    ] as const) {
+      const r = await req(path, method, method === "GET" ? undefined : {});
+      expect(r.status, path).toBe(401);
+    }
+  });
+
+  it("history 带 token 可读", async () => {
+    const token = await mkSession("user-c1-h", "历史读者");
+    const r = await req("/api/messages/history", "GET", undefined, { Authorization: `Bearer ${token}` });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+});
+
+describe("P1 · resolve 越权与任务复活修复（I1）", () => {
+  it("body.sender_id 被忽略、强制本人：他人待确认任务不可被解析", async () => {
+    await query(
+      "INSERT INTO task(content,creator,assignee,status,confidence,pending_meta) VALUES('I1任务','user-i1-victim','待指派','pending_assignee','medium',$1)",
+      [JSON.stringify({ candidates: [{ person_id: 1, label: "张三" }] })]);
+    const attacker = await mkSession("user-i1-attacker", "攻击者");
+    const r = await req("/api/tasks/resolve", "POST", { sender_id: "user-i1-victim", choice: "1" },
+      { Authorization: `Bearer ${attacker}` });
+    expect((r.body as Record<string, unknown>).ok).toBe(false);
+    expect((await one("SELECT status FROM task WHERE content='I1任务'"))!.status).toBe("pending_assignee");
+  });
+
+  it("done/cancelled 任务不可经 resolve 复活为 confirmed", async () => {
+    await query(
+      "INSERT INTO task(content,creator,assignee,status,confidence,pending_meta) VALUES('I1已完成','u','张三','done','high',$1)",
+      [JSON.stringify({ candidates: [{ person_id: 1, label: "张三" }] })]);
+    const tid = Number((await one("SELECT id FROM task WHERE content='I1已完成'"))!.id);
+    const token = await mkSession("user-i1-done", "用户");
+    const r = await req("/api/tasks/resolve", "POST", { choice: "1", task_id: tid },
+      { Authorization: `Bearer ${token}` });
+    expect((r.body as Record<string, unknown>).ok).toBe(false);
+    expect((await one("SELECT status FROM task WHERE id=$1", [tid]))!.status).toBe("done");
   });
 });
