@@ -99,9 +99,13 @@ curl -X POST http://127.0.0.1:8000/api/role/set \
 
 - 所有业务端点要求登录（session token，Bearer 头）；未登录 401
 - 管理端点（角色设置/审批决定）= 登录 + group_admin 角色；member 403
+- 挖掘裁决（`/api/mine/candidates/:cid/decide`）仅 group_admin——accept 写团队共享的
+  person/alias/term；候选列表登录可读
+- 会话历史成员校验：`/api/messages`、`/api/messages/history` 成员只能读本群
+  （按 `group_member` 表）；无 `conv_id` 的全量与任意群读取限 group_admin
 - SSE（`/api/events/stream`）接受 `?token=` 查询参数（EventSource 无法带 header）——
   仅限内网/反代场景使用，公网部署需换 fetch 流式方案
-- 私信（ai_dm）只能看自己的；admin 可查他人
+- 私信（ai_dm）只能看自己的；member 显式查他人 sender_id → 403；admin 可查他人
 - LLM 燃烧端点（`/api/mine/run`、`/api/minutes/generate`）仅 group_admin
 - 审计：confirm/reject/complete 均记录真实操作人（session user id）
 
