@@ -4,6 +4,8 @@ import { db } from "./db/drizzle.js";
 import { TASK_COLS, auditLog, distinctAliasNames, findPersonsByAlias, insertTask, type TaskRow } from "./repos.js";
 import { task as taskT } from "./db/schema.js";
 import { getLlm } from "./llm.js";
+import { jevGate, jevPickCompletion } from "./jev.js";
+import { config } from "./config.js";
 import { buildSysCtx } from "./memory.js";
 import { fanout } from "./sse.js";
 
@@ -39,6 +41,9 @@ const IntentZ = z.object({
 });
 export type Intent = z.infer<typeof IntentZ>;
 
+const EMPTY_INTENT: Intent = { is_task: false, confidence: "low", content: null, assignee_hint: null,
+  deadline_hint: null, assign_mode: "none", is_completion: false };
+
 export async function intentDetect(msg: string, sysCtx = ""): Promise<Intent> {
   let system = INTENT_SYSTEM;
   if (sysCtx) system += "\n" + sysCtx;
@@ -46,8 +51,7 @@ export async function intentDetect(msg: string, sysCtx = ""): Promise<Intent> {
   try {
     return IntentZ.parse(JSON.parse(raw));
   } catch {
-    return { is_task: false, confidence: "low", content: null, assignee_hint: null,
-             deadline_hint: null, assign_mode: "none", is_completion: false };
+    return EMPTY_INTENT;
   }
 }
 
@@ -110,7 +114,15 @@ export async function handleCompletion(msg: string, sender: string, contentHint?
       if (hint.slice(0, 4) && (t.content ?? "").includes(hint.slice(0, 4))) { picked = t; break; }
     }
   }
-  picked = picked ?? tasks[0];
+  // 多候选且无内容 hint：Jev Choice 判定完成了哪条（治"无脑完成最近一条"的误完成）。
+  // Jev 未启用时维持旧行为（tasks[0]）；启用后 Jev 说"没有"则不完成。
+  if (!picked && tasks.length > 1) {
+    const cid = await jevPickCompletion(msg, s, tasks.map((t) => ({ id: t.id, content: t.content ?? "", assignee: t.assignee })));
+    if (cid) picked = tasks.find((t) => t.id === cid) ?? null;
+    else if (!(config.jevGate === "jev" && config.jevKey)) picked = tasks[0];
+  }
+  picked = picked ?? (tasks.length === 1 ? tasks[0] : null);
+  if (!picked) return null;
   const { completeTask } = await import("./tasks.js");
   if (await completeTask(picked.id, `user:${s}`)) {
     fanout("task_completed", { taskId: picked.id, by: "chat" });
@@ -131,7 +143,20 @@ export interface ProcessResult {
 
 export async function processMessage(msg: string, sender = "李娜(娜姐)", groupId?: string | null): Promise<ProcessResult> {
   const sysCtx = groupId ? await buildSysCtx(groupId) : "";
+  // Jev 门（System One 预判，~250ms）：shadow 只记录双方判定，enforce 低概率直接跳过（不烧 StepFun）
+  const gate = await jevGate(msg);
+  if (gate && config.jevMode === "enforce" && gate.attention < config.jevThreshold) {
+    await auditLog("gate", "jev_skip", { p: gate.attention, mode: gate.mode, msg: msg.slice(0, 60) });
+    return { message: msg, sender, intent: EMPTY_INTENT, action: "skip" };
+  }
   const intent = await intentDetect(msg, sysCtx);
+  if (gate) {
+    await auditLog("gate", config.jevMode === "enforce" ? "jev_pass" : "jev_shadow", {
+      p: gate.attention, jev_mode: gate.mode,
+      sf_is_task: intent.is_task, sf_is_completion: intent.is_completion,
+      agree: (gate.attention >= config.jevThreshold) === (intent.is_task || intent.is_completion),
+    });
+  }
   const base: ProcessResult = { message: msg, sender, intent, action: "skip" };
   if (!intent.is_task) {
     // G1 口头完成：is_completion 命中 → 尝试标记对应任务 done（宁漏勿错）

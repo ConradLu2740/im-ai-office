@@ -15,6 +15,13 @@ export const config = {
   llmApiKey: env("LLM_API_KEY", ""),
   llmModel: env("LLM_MODEL", "deepseek-chat"),
   llmRetries: parseInt(env("IMAI_LLM_RETRIES", "2"), 10),
+  // Jev（TypeSafe System One 决策门；none=关闭，行为与加固前完全一致）
+  jevGate: env("IMAI_LLM_GATE", "none"),            // none | jev
+  jevMode: env("IMAI_JEV_MODE", "shadow"),          // shadow=只记录不拦截 | enforce=低概率直接跳过
+  jevThreshold: parseFloat(env("IMAI_JEV_THRESHOLD", "0.45")),
+  jevBase: env("JEV_BASE", "https://api.typesafe.ai"),
+  jevKey: env("TYPESAFE_API_KEY", ""),
+  jevModel: env("JEV_MODEL", "jev-latest"),
   // OpenIM
   openimApi: env("OPENIM_API", "http://127.0.0.1:10002"),
   openimAdminToken: env("OPENIM_ADMIN_TOKEN", ""),

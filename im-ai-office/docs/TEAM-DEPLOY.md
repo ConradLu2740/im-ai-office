@@ -109,6 +109,17 @@ curl -X POST http://127.0.0.1:8000/api/role/set \
 - LLM 燃烧端点（`/api/mine/run`、`/api/minutes/generate`）仅 group_admin
 - 审计：confirm/reject/complete 均记录真实操作人（session user id）
 
+## 7b. 可选：Jev 决策门（降 LLM 成本与漏判）
+
+`IMAI_LLM_GATE=jev` 开启后，每条群消息先过一次 Jev（TypeSafe System One，~250ms）：
+
+- `IMAI_JEV_MODE=shadow`（默认）：只把“Jev 概率 vs StepFun 判定”写入审计（actor=`gate`），
+  不拦截流量——先跑一周看 `agree` 率再决定
+- `IMAI_JEV_MODE=enforce`：概率低于 `IMAI_JEV_THRESHOLD`（默认 0.45）直接跳过，不调 StepFun
+- 口头完成的多候选匹配也改走 Jev Choice（治“无脑完成最近一条”）
+- Jev 故障/未配 key 时自动回退全量 LLM 路径，可用性优先
+- 50 条真实语料评测：门 FN=0 / acc=98%（StepFun 88%/FN=4），p50 245ms vs 3179ms
+
 ## 8. 备份
 
 ```bash
