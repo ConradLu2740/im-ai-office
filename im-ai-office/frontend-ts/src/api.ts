@@ -12,6 +12,7 @@ const client = hc<AppType>(API_BASE);
 declare global {
   interface Window {
     __TAURI__?: { core: { invoke: (cmd: string, args: unknown) => Promise<unknown> } };
+    imai?: { ipc: { invoke: (channel: string, payload?: unknown) => Promise<unknown> } };
   }
 }
 
@@ -25,10 +26,9 @@ export function getTauriInvoke(): ((cmd: string, args: unknown) => Promise<unkno
 
 export interface ApiResult { ok?: boolean; error?: string; [k: string]: unknown }
 
-// 会话状态（app.ts 通过 apiSetSession 桥接；本模块内部 _relogin 使用）
+// 会话状态（app.ts 通过 apiSetSession 桥接）
 let currentUser: string | null = null;
 let currentToken: string | null = null;
-let _reloginInFlight: Promise<boolean> | null = null;
 
 export function apiSetSession(user: string | null, token: string | null): void {
   currentUser = user;
@@ -38,28 +38,13 @@ export function apiSetSession(user: string | null, token: string | null): void {
   }
 }
 
-function authHeaders(): Record<string, string> {
-  return currentToken ? { "Authorization": `Bearer ${currentToken}` } : {};
+/** 当前会话 token（SSE ?token= 等无法带 header 的场景用） */
+export function apiToken(): string | null {
+  return currentToken;
 }
 
-async function _relogin(): Promise<boolean> {
-  // 静默重签 token（/openim/login 当前无口令）；单飞防并发重放。
-  if (!currentUser) return false;
-  if (!_reloginInFlight) {
-    _reloginInFlight = (async () => {
-      try {
-        const res = await _rawApi("/openim/login", { method: "POST", body: JSON.stringify({ user_id: currentUser }) }) as ApiResult;
-        if (res && res.ok && res.token) {
-          try { localStorage.setItem("imai_token", String(res.token)); } catch { /* 隐私模式 */ }
-          return true;
-        }
-      } catch { /* 忽略 */ }
-      return false;
-    })();
-  }
-  const ok = await _reloginInFlight;
-  _reloginInFlight = null;
-  return ok;
+function authHeaders(): Record<string, string> {
+  return currentToken ? { "Authorization": `Bearer ${currentToken}` } : {};
 }
 
 interface ApiOpts { method?: string; body?: string | null; headers?: Record<string, string> }
@@ -104,20 +89,8 @@ async function _rawApi(path: string, opts: ApiOpts = {}): Promise<unknown> {
   return await hcDispatch(path, method, body);
 }
 
-export async function api(path: string, opts: ApiOpts = {}, _retried = false): Promise<ApiResult> {
-  let res;
-  try {
-    res = await _rawApi(path, opts) as ApiResult;
-  } catch (e) {
-    // 网络层失败且疑似登录态问题：重签一次再试
-    if (!_retried && currentUser && /token|登录|auth/i.test(String(e))) {
-      if (await _relogin()) return api(path, opts, true);
-    }
-    throw e;
-  }
-  // 业务层失败且疑似 token 失效：静默重签后重试原请求一次
-  if (!_retried && res && res.ok === false && /token/i.test(res.error || "")) {
-    if (await _relogin()) return api(path, opts, true);
-  }
-  return res;
+export async function api(path: string, opts: ApiOpts = {}): Promise<ApiResult> {
+  // P0 清理：原 _relogin 重签路径指向已删除的 /openim/login（P3 起登录走 /api/auth/login），
+  // token 失效由 app.ts 的登录态检查处理，这里不再静默重试。
+  return await _rawApi(path, opts) as ApiResult;
 }

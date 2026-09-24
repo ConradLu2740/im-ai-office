@@ -1,4 +1,3 @@
-import { config, warnOnce } from "./config.js";
 import { sessionUser, type SessionUser } from "./auth.js";
 import type { Context } from "hono";
 
@@ -9,36 +8,29 @@ export async function requireUser(c: Context): Promise<SessionUser | null> {
   return sessionUser(header?.startsWith("Bearer ") ? header.slice(7).trim() : alt ?? null);
 }
 
-// ============ 认证依赖（deps.py 的 TS 版；兼容铁律：env 未设置=放行+一次性 WARN） ============
-
-export function checkAdmin(c: Context): Record<string, unknown> | null {
-  const expected = config.adminToken;
-  if (!expected) {
-    warnOnce("admin", "IMAI_ADMIN_TOKEN 未设置，管理端点处于无鉴权模式（内网自用默认）");
-    return null;
-  }
-  if (c.req.header("X-IMAI-Admin-Token") === expected) return null;
-  return { ok: false, error: "admin token required" };
+/**
+ * 管理端点门（P0 终审修复）：登录 + group_admin 角色。
+ * 原 checkAdmin（X-IMAI-Admin-Token 头 + env fail-closed）有两个问题：
+ * 前端只会带 Bearer，RBAC 面板必然 401；且 token 与角色两套体系分裂。
+ * 收敛为与 /api/audit、term delete 一致的模式：session + role。
+ */
+export async function requireAdmin(c: Context): Promise<{ user: SessionUser | null; denied: Response | null }> {
+  const user = await requireUser(c);
+  if (!user) return { user: null, denied: c.json({ ok: false, error: "unauthorized" }, 401) };
+  const { getRole } = await import("./rbac.js");
+  if ((await getRole(user.id)) !== "group_admin") return { user: null, denied: c.json({ ok: false, error: "forbidden" }, 403) };
+  return { user, denied: null };
 }
 
-export function checkCallbackToken(c: Context): Record<string, unknown> | null {
-  const expected = config.authToken;
-  if (!expected) {
-    warnOnce("callback", "AUTH_TOKEN 未设置，回调不校验令牌（内网自用默认）");
-    return null;
-  }
-  const header = c.req.header("X-IMAI-Token") || "";
-  const qp = (c.req.query("token") || "").split("/")[0];
-  if (header === expected || qp === expected) return null;
-  return { ok: false, error: "callback token required" };
-}
-
-export function checkLoginPassword(body: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
-  const expected = config.loginPassword;
-  if (!expected) {
-    warnOnce("login", "IMAI_LOGIN_PASSWORD 未设置，登录无口令校验（内网自用默认）");
-    return null;
-  }
-  if ((body || {})["password"] === expected) return null;
-  return { ok: false, error: "password required" };
+/**
+ * 会话历史读取权限（M5）：group_admin 任意读；成员只能读本群（conv_id 形如 sg_<group_id>）；
+ * 非 sg_ 前缀的会话不开放历史读取。无 conv_id 的全量读取仅 admin。
+ */
+export async function canReadConv(user: SessionUser, convId: string | null | undefined): Promise<boolean> {
+  const { getRole } = await import("./rbac.js");
+  if ((await getRole(user.id)) === "group_admin") return true;
+  if (!convId) return false;
+  if (!convId.startsWith("sg_")) return false;
+  const { isGroupMember } = await import("./repos.js");
+  return isGroupMember(user.id, convId.slice(3));
 }

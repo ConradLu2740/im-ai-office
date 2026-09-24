@@ -9,7 +9,7 @@ const env = (k: string, d = "") => process.env[k] ?? d;
 
 export const config = {
   port: parseInt(env("IMAI_TS_PORT", env("PORT", "8000")), 10),
-  databaseUrl: env("DATABASE_URL", "postgres://imai:openIM123@127.0.0.1:5432/imai"),
+  databaseUrl: env("DATABASE_URL", "postgres://imai:imai_secret@127.0.0.1:5432/imai"),
   // LLM（与 Python 版同名 env）
   llmBase: env("LLM_BASE", "https://api.deepseek.com/v1"),
   llmApiKey: env("LLM_API_KEY", ""),
@@ -19,10 +19,6 @@ export const config = {
   openimApi: env("OPENIM_API", "http://127.0.0.1:10002"),
   openimAdminToken: env("OPENIM_ADMIN_TOKEN", ""),
   openimSecret: env("OPENIM_SECRET", "openIM123"),
-  authToken: env("AUTH_TOKEN", ""),
-  // 三方校验（deps 哲学：env 未设置=放行+一次性 WARN）
-  adminToken: env("IMAI_ADMIN_TOKEN", ""),
-  loginPassword: env("IMAI_LOGIN_PASSWORD", ""),
   // 提醒调度（0=关闭）
   remindIntervalSec: parseInt(env("IMAI_REMIND_INTERVAL_SEC", "60"), 10),
   remindToGroup: env("IMAI_REMIND_TO_GROUP", "0") === "1",

@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db/drizzle.js";
 import { aiDm, task } from "./db/schema.js";
 import { getTaskDict, latestPendingAssigneeByDmTaskid, latestPendingAssigneeForCreator, type TaskRow } from "./repos.js";
@@ -46,10 +46,14 @@ function parseCandidates(t: TaskRow): Candidate[] {
   } catch { return []; }
 }
 
-async function confirmWithAssigneeClear(taskId: number, assignee: string): Promise<void> {
-  await db.update(task)
+/** 歧义确认落位：条件更新（仅 pending_* 可确认）——done/cancelled 任务不可被复活（I1 修复）。
+ *  返回是否真的更新了行。 */
+async function confirmWithAssigneeClear(taskId: number, assignee: string): Promise<boolean> {
+  const rows = await db.update(task)
     .set({ status: "confirmed", assignee, pendingMeta: null, updatedAt: sql`NOW()` })
-    .where(eq(task.id, taskId));
+    .where(and(eq(task.id, taskId), inArray(task.status, ["pending_assignee", "pending_confirmation"])))
+    .returning({ id: task.id });
+  return rows.length > 0;
 }
 
 export async function resolveAssigneeReply(sender: string, reply: string): Promise<Record<string, unknown>> {
@@ -66,7 +70,9 @@ export async function resolveAssigneeReply(sender: string, reply: string): Promi
     const idx = parseInt(replyNorm, 10) - 1;
     if (0 <= idx && idx < candidates.length) {
       const assignee = candidates[idx].label;
-      await confirmWithAssigneeClear(t.id, assignee);
+      if (!(await confirmWithAssigneeClear(t.id, assignee))) {
+        return { ok: false, reason: "task_not_pending" };
+      }
       return { ok: true, action: "confirmed", taskId: t.id, assignee };
     }
     return { ok: false, reason: "invalid_choice", choices: candidates.map((c, i) => `${i + 1}. ${c.label}`) };
@@ -96,7 +102,9 @@ export async function resolveTaskByChoice(sender: string, choice: string, taskId
     const idx = parseInt(choiceNorm, 10) - 1;
     if (0 <= idx && idx < candidates.length) {
       const assignee = candidates[idx].label;
-      await confirmWithAssigneeClear(t.id, assignee);
+      if (!(await confirmWithAssigneeClear(t.id, assignee))) {
+        return { ok: false, error: "task_not_pending" };
+      }
       return { ok: true, action: "confirmed", taskId: t.id, assignee };
     }
     return { ok: false, error: "invalid_choice", candidates: candidates.map((c, i) => `${i + 1}. ${c.label}`) };

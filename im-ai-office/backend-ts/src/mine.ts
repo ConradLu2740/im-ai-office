@@ -133,7 +133,8 @@ async function accept(cand: Record<string, unknown>): Promise<Record<string, unk
     const dup = await db.select({ x: alias.id }).from(alias)
       .where(and(eq(alias.personId, pid), eq(alias.name, aliasName))).limit(1);
     if (!dup.length) {
-      await db.insert(alias).values({ personId: pid, name: aliasName });
+      // 唯一键 (person_id, name) 兜底：并发/重复候选不炸 500
+      await db.insert(alias).values({ personId: pid, name: aliasName }).onConflictDoNothing();
     }
     return { personId: pid, alias: aliasName };
   }
@@ -147,17 +148,36 @@ async function accept(cand: Record<string, unknown>): Promise<Record<string, unk
   throw new Error("bad_kind");
 }
 
-export async function decideCandidate(cid: number, action: string): Promise<Record<string, unknown> | null> {
-  const rows = await db.select().from(mineCandidate).where(eq(mineCandidate.id, cid)).limit(1);
-  if (!rows.length) return null;
-  const cand = rowToDict(rows[0] as unknown as Record<string, unknown>);
+export async function decideCandidate(cid: number, action: string, decidedBy = "user"): Promise<Record<string, unknown> | null> {
   if (!["accept", "reject"].includes(action)) throw new Error("bad_action");
-  if (cand.status !== "pending") throw new Error("already_decided");
-  const result = action === "accept" ? await accept(cand) : {};
-  await db.update(mineCandidate)
-    .set({ status: action === "accept" ? "accepted" : "rejected", decidedAt: sql`NOW()`, decidedBy: "user" })
-    .where(eq(mineCandidate.id, cid));
-  await auditLog("user", action === "accept" ? "mine_accepted" : "mine_rejected",
+  // 条件更新先行（claim）：只有 pending 的候选能被裁决——并发双 decide 只有一个成功，
+  // 杜绝 check-then-act 竞态导致的重复建 person/alias（alias 唯一键冲突曾直接把第二次变成 500）
+  const claimed = await db.update(mineCandidate)
+    .set({ status: action === "accept" ? "accepted" : "rejected", decidedAt: sql`NOW()`, decidedBy })
+    .where(and(eq(mineCandidate.id, cid), eq(mineCandidate.status, "pending")))
+    .returning({ id: mineCandidate.id });
+  if (!claimed.length) {
+    const exists = await db.select({ x: mineCandidate.id }).from(mineCandidate)
+      .where(eq(mineCandidate.id, cid)).limit(1);
+    if (!exists.length) return null; // candidate not found
+    throw new Error("already_decided");
+  }
+  const rows = await db.select().from(mineCandidate).where(eq(mineCandidate.id, cid)).limit(1);
+  const cand = rowToDict(rows[0] as unknown as Record<string, unknown>);
+  const nextStatus = action === "accept" ? "accepted" : "rejected";
+  let result: Record<string, unknown> = {};
+  if (action === "accept") {
+    try {
+      result = await accept(cand);
+    } catch (e) {
+      // accept 副作用失败 → 回滚 claim，候选保持 pending 可重试
+      await db.update(mineCandidate)
+        .set({ status: "pending", decidedAt: null, decidedBy: null })
+        .where(eq(mineCandidate.id, cid));
+      throw e;
+    }
+  }
+  await auditLog(decidedBy, action === "accept" ? "mine_accepted" : "mine_rejected",
     { candidateId: cid, kind: cand.kind, ...result });
-  return { id: cid, status: action === "accept" ? "accepted" : "rejected", result };
+  return { id: cid, status: nextStatus, result };
 }

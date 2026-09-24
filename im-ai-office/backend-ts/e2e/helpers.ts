@@ -1,9 +1,11 @@
 import { Pool } from "pg";
 
-// E2E 直连真实环境：BASE 默认本机 8000；PG 校验连生产 imai 库（与 acceptance.py 同 DSN）
+// E2E 直连真实环境：BASE 默认本机 8000；PG 校验默认连 imai_test 库
+// （P0 加固：原默认连生产 imai 库，cleanup 的 DELETE FROM event_dedup 会清掉生产去重状态；
+//  要连生产需显式设 IMAI_E2E_DATABASE_URL）
 export const BASE = process.env.IMAI_E2E_BASE ?? "http://localhost:8000";
 const DSN =
-  process.env.IMAI_E2E_DATABASE_URL ?? "postgresql://imai:imai_secret@127.0.0.1:5432/imai";
+  process.env.IMAI_E2E_DATABASE_URL ?? "postgresql://imai:imai_secret@127.0.0.1:5432/imai_test";
 
 export const pool = new Pool({ connectionString: DSN, max: 2 });
 

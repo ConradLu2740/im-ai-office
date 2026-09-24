@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle.js";
 import { message } from "../db/schema.js";
-import { auditLog, messageAdd, messageList, insertTask } from "../repos.js";
+import { auditLog, messageAdd, messageList } from "../repos.js";
 import { processMessage, auditAiProcessed } from "../pipeline.js";
 import { deterministicMsgId, isDuplicate, markConsumed } from "../sse.js";
 import { aiDmSend } from "../aiDm.js";
 import { buildConfirmText } from "../actions.js";
+import { requireUser } from "../deps.js";
+import { canReadConv } from "../deps.js";
 
 function extractTextContent(raw: unknown): string {
   if (raw && typeof raw === "object") {
@@ -16,18 +18,38 @@ function extractTextContent(raw: unknown): string {
   return String(raw ?? "");
 }
 
+/** task_id 路由参数校验：拒绝 NaN/非正整数（原 Number() 后直落 DB 查询） */
+function parseTaskId(c: import("hono").Context): number | null {
+  const n = Number(c.req.param("task_id"));
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 // /api/chat：提交一条群消息跑完整链路（测试/调试入口）
 export const taskRoutes = new Hono()
   .post("/api/chat", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
+  const message = String(body.message ?? "");
+  const sender = String(body.sender ?? "李娜(娜姐)");
+  if (!message) return c.json({ ok: false, error: "message 不能为空" });
+  // 与 simulate/sdk 同一套 event_dedup 去重（原 /api/chat 直穿管线，同消息会重复建任务）
+  const msgId = deterministicMsgId("sg_chat", sender, message);
+  if (await isDuplicate(msgId)) {
+    await auditLog("entry", "ai_dedup_skip", { msgId, source: "chat" });
+    return c.json({ ok: true, dedup: true, msg_id: msgId });
+  }
   const t0 = performance.now();
-  const result = await processMessage(String(body.message ?? ""), String(body.sender ?? "李娜(娜姐)"));
-  await auditAiProcessed(null, result, String(body.message ?? ""), "chat", performance.now() - t0);
+  const result = await processMessage(message, sender);
+  await auditAiProcessed(msgId, result, message, "chat", performance.now() - t0);
+  await markConsumed(msgId);
   return c.json(result);
 })
 
 // /api/tasks：看板数据（默认排除 cancelled）
   .get("/api/tasks", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const status = c.req.query("status");
   const { listTaskDicts } = await import("../repos.js");
   const { memoryProofs } = await import("../memory.js");
@@ -42,6 +64,8 @@ export const taskRoutes = new Hono()
 
 // /api/simulate_message：模拟一条群消息（不依赖 OpenIM）
   .post("/api/simulate_message", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
   const sender = String(body.sender ?? "李娜(娜姐)");
   const text = String(body.text ?? body.message ?? "");
@@ -66,6 +90,8 @@ export const taskRoutes = new Hono()
 
 // /api/sdk_message：测试/验收入口（acceptance 用）；生产消息一律走回调
   .post("/api/sdk_message", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
   const sender = String(body.sender ?? "同事");
   const text = String(body.text ?? "");
@@ -97,52 +123,76 @@ export const taskRoutes = new Hono()
 
 // /api/messages：会话历史（DB 唯一渲染权威）
   .get("/api/messages", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  // M5：成员只能读本群历史；无 conv_id 的全量读取限 group_admin
+  if (!(await canReadConv(user, c.req.query("conv_id")))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   const convId = c.req.query("conv_id");
   const rows = await messageList(convId || undefined);
   return c.json({ messages: rows });
 })
   .post("/api/tasks/:task_id/confirm", async (c) => {
-  const taskId = Number(c.req.param("task_id"));
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  const taskId = parseTaskId(c);
+  if (taskId === null) return c.json({ ok: false, error: "invalid task_id" }, 400);
   const body = await c.req.json().catch(() => ({}));
   const { confirmTask } = await import("../tasks.js");
-  const ok = await confirmTask(taskId, body.assignee ?? null, body.deadline ?? null);
+  const ok = await confirmTask(taskId, body.assignee ?? null, body.deadline ?? null, user.id);
   return c.json({ ok });
 })
   .post("/api/tasks/:task_id/reject", async (c) => {
-  const taskId = Number(c.req.param("task_id"));
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  const taskId = parseTaskId(c);
+  if (taskId === null) return c.json({ ok: false, error: "invalid task_id" }, 400);
   const body = await c.req.json().catch(() => ({}));
   const { rejectTask } = await import("../tasks.js");
-  const ok = await rejectTask(taskId, body.reason ?? null);
+  const ok = await rejectTask(taskId, body.reason ?? null, user.id);
   return c.json({ ok });
 })
 
 // G1 完成回流：任务标记 done，逾期提醒自然终止
   .post("/api/tasks/:task_id/complete", async (c) => {
-  const taskId = Number(c.req.param("task_id"));
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  const taskId = parseTaskId(c);
+  if (taskId === null) return c.json({ ok: false, error: "invalid task_id" }, 400);
   const body = await c.req.json().catch(() => ({}));
   const { completeTask } = await import("../tasks.js");
   const { fanout } = await import("../sse.js");
-  const ok = await completeTask(taskId, body.actor || "user");
+  const ok = await completeTask(taskId, user.id);
   if (ok) fanout("task_completed", { taskId });
   return c.json({ ok });
 })
   .post("/api/tasks/resolve", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
+  const taskId = body.task_id == null ? null : Number(body.task_id);
+  if (taskId !== null && (!Number.isInteger(taskId) || taskId <= 0)) {
+    return c.json({ ok: false, error: "invalid task_id" }, 400);
+  }
+  // I1 修复：sender_id 强制取会话身份（原信 body，可解析他人的待确认任务）
   const { resolveTaskByChoice } = await import("../aiDm.js");
-  const r = await resolveTaskByChoice(String(body.sender_id ?? ""), String(body.choice ?? ""), body.task_id);
+  const r = await resolveTaskByChoice(user.id, String(body.choice ?? ""), taskId);
   return c.json(r);
 })
 
 // 迭代2 B1：已确认任务修改（改负责人/改期/取消）
   .patch("/api/tasks/:task_id", async (c) => {
-  const taskId = Number(c.req.param("task_id"));
+  const user = await requireUser(c);
+  if (!user) return c.json({ ok: false, error: "unauthorized" }, 401);
+  const taskId = parseTaskId(c);
+  if (taskId === null) return c.json({ ok: false, error: "invalid task_id" }, 400);
   const body = await c.req.json().catch(() => ({}));
   if (body.action && body.action !== "cancel") {
     return c.json({ ok: false, error: "action 仅支持 cancel" }, 400);
   }
   const { updateTask } = await import("../tasks.js");
-  const { task, err } = await updateTask(taskId, body.assignee ?? null, body.deadline ?? null, body.action === "cancel");
+  const { task, err } = await updateTask(taskId, body.assignee ?? null, body.deadline ?? null, body.action === "cancel", user.id);
   if (err) return c.json({ ok: false, error: err }, 400);
   return c.json({ ok: true, task });
 });
-void insertTask;

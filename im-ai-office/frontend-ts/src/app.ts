@@ -1,7 +1,7 @@
 // 类型已全量收紧（2026-09-03）：移除 @ts-nocheck，DOM 窄化/unknown 收敛完成。
 // API 层已摘出至 api.ts（无 @ts-nocheck，Hono RPC 契约全检）。
 
-import { api, apiSetSession, getTauriInvoke, type ApiResult } from "./api.js";
+import { api, apiSetSession, apiToken, getTauriInvoke, type ApiResult } from "./api.js";
 
 window.onerror = function (msg: string | Event, src?: string, line?: number) {
   document.documentElement.setAttribute("data-jserr", String(msg).slice(0,200) + " @" + String(src||"").split("/").pop() + ":" + line);
@@ -208,11 +208,11 @@ function setSDKStatus(text: string, ok: boolean) {
 }
 
 async function initSDK(userID: string, token: string) {
-  // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供（initSSE），
-  // 会话列表走后端 REST（loadConversations）。此函数仅保留入口语义。
-  // 注意：onload 时 initSSE 已先行且本地连接毫秒级完成——此处不得覆盖已连接状态
-  //（2026-09-03 实证：覆盖后无第二次 onopen，状态永远卡"连接中"，纯显示 bug）
+  // 网关收敛后（网关收敛Spec §3-1）：不再有网关进程，实时性由 SSE 提供。
+  // M2：登录（doLogin）与会话恢复（onload）两条路径都经本函数，SSE 统一在此建立；
+  // 未登录时 initSSE 自行跳过，已连接则不重连。
   if (!esAI || esAI.readyState !== 1) setSDKStatus("实时通道连接中…", false);
+  initSSE();
   loadConversations();
   startSelfHeal();
 }
@@ -1221,14 +1221,20 @@ function renderAICard(r: AiCardResult) {
 }
 
 // 实时事件（网关收敛后：SSE 是唯一实时通道，消息/任务/卡片都走这里）
+// Electron 壳系统通知的事件类型（主进程 ipcMain "notify" 通道；主进程直连 SSE 已移除——无法带 token）
+const NOTIFY_EVENT_TYPES = new Set(["task_created", "reminder", "digest", "ai.card"]);
 let esAI: EventSource | null = null;
 let _lastReconnectRefresh = 0;
 let _sseRetryMs = 0;
 let _sseDiagTimer: number | null = null;
 function initSSE() {
   if (!window.EventSource || esAI) return;
+  // M2：未登录不建流（原匿名直连 SSE 必 401，还会按退避反复重撞）
+  if (!apiToken()) return;
   try {
-    esAI = new EventSource(API_BASE + "/api/events/stream");
+    // P0：SSE 端点已要求登录；EventSource 不能带 header → token 走 ?token=（见后端 misc.ts）
+    const tok = apiToken();
+    esAI = new EventSource(API_BASE + "/api/events/stream" + (tok ? "?token=" + encodeURIComponent(tok) : ""));
     esAI.onopen = () => {
       setSDKStatus("实时通道已连接", true);
       _sseRetryMs = 0;
@@ -1277,6 +1283,11 @@ function initSSE() {
         if (ev.type === "task_status") loadTasks(); // 确认/驳回/更新后的轻量收敛：全量刷新（5s 轮询兜底不变）
         if (ev.type === "task_completed") { loadTasks(); showToast("任务已完成 ✅", true); }
         if (ev.type === "task_created" || ev.type === "ai.card") updateAIUnread();
+        // Electron 壳：通知类事件转发主进程弹系统通知（渲染层持有 token，主进程直连 SSE 已移除）
+        if (ev.type && NOTIFY_EVENT_TYPES.has(ev.type) && window.imai?.ipc) {
+          const body = (ev as { content?: string; text?: string }).content ?? (ev as { text?: string }).text ?? ev.type;
+          window.imai.ipc.invoke("notify", { title: "IMAI 提醒", body }).catch(() => {});
+        }
       } catch (_) {}
     };
     // 断线重连增强：网络错误时 EventSource 通常自动重连，但后端重启等场景可能进入
@@ -1287,8 +1298,23 @@ function initSSE() {
       if (esAI && esAI.readyState === 2) {
         esAI.close();
         esAI = null;
-        _sseRetryMs = _sseRetryMs ? Math.min(_sseRetryMs * 2, 30000) : 2000;
-        setTimeout(initSSE, _sseRetryMs);
+        // M2：重建前先验会话——token 失效则回登录页，不再指数退避地反复撞 401
+        fetch(API_BASE + "/api/auth/me", { headers: { Authorization: "Bearer " + (apiToken() ?? "") } })
+          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+          .then((me) => {
+            if (!me.ok) return Promise.reject("invalid");
+            _sseRetryMs = _sseRetryMs ? Math.min(_sseRetryMs * 2, 30000) : 2000;
+            setTimeout(initSSE, _sseRetryMs);
+          })
+          .catch(() => {
+            localStorage.removeItem("imai_user");
+            localStorage.removeItem("imai_token");
+            currentUser = null;
+            currentToken = null;
+            apiSetSession(null, null);
+            setSDKStatus("登录态已过期，请重新登录", false);
+            document.getElementById("loginPage").classList.remove("hidden");
+          });
       }
     };
     // 诊断：5s 后仍未连上，在状态文本中暴露 EventSource.readyState
@@ -1336,7 +1362,7 @@ window.onload = () => {
   setInterval(checkBackend, 3000);
   setInterval(() => { if (currentToken) loadTasks(); }, 5000);
   setInterval(() => { if (currentToken) updateAIUnread(); }, 5000);
-  initSSE();   // 新增：实时事件推送（轮询保留作兑底）
+  // M2：SSE 改由 initSDK（登录/会话恢复成功后）建立，此处不再匿名预连
   if (getTauriInvoke()) setTimeout(startBackend, 500);
 };
 

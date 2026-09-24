@@ -8,9 +8,9 @@ import { resolve } from "../src/pipeline.js";
 // G 系关键守卫移植（test_g11/g12/g3/g4 精选）：TS 后端的核心不变量
 // P3：发送入口改为 /api/messages/send（内联 AI 闸门），/callback 与 /openim/* 已删除
 
-async function request(path: string, method: string, body?: unknown, token?: string): Promise<Record<string, unknown>> {
+async function request(path: string, method: string, body?: unknown, token?: string, extra: Record<string, string> = {}): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...extra };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await app.request(path, {
     method, headers,
@@ -19,11 +19,11 @@ async function request(path: string, method: string, body?: unknown, token?: str
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-const post = (path: string, body?: unknown, token?: string) => request(path, "POST", body, token);
+const post = (path: string, body?: unknown, token?: string, extra?: Record<string, string>) => request(path, "POST", body, token, extra);
 
-async function get(path: string): Promise<Record<string, unknown>> {
+async function get(path: string, token?: string): Promise<Record<string, unknown>> {
   const { app } = await import("../src/app.js");
-  const res = await app.request(path);
+  const res = await app.request(path, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
   return res.json() as Promise<Record<string, unknown>>;
 }
 
@@ -86,11 +86,12 @@ describe("G12 · 完成回流 + G4 观测", () => {
 
   it("complete 端点：confirmed → done + audit；二次拒绝；done 不触发提醒档位", async () => {
     const tid = await mkTask("出季度数据报表");
-    const r = await post(`/api/tasks/${tid}/complete`, { actor: "user001" });
+    const token = await mkSession("user001", "user001");
+    const r = await post(`/api/tasks/${tid}/complete`, { actor: "user001" }, token);
     expect(r.ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [tid]))!.status).toBe("done");
     expect(Number((await one("SELECT COUNT(*)::int AS n FROM audit WHERE action='task_completed'"))!.n)).toBeGreaterThanOrEqual(1);
-    expect((await post(`/api/tasks/${tid}/complete`, { actor: "user001" })).ok).toBe(false);
+    expect((await post(`/api/tasks/${tid}/complete`, { actor: "user001" }, token)).ok).toBe(false);
     const { judgeTiers } = await import("../src/reminder.js");
     expect(judgeTiers({ status: "done", assignee: "user001", deadline: "周五",
       deadline_at: "2026-08-01 10:00", created_at: "2026-08-01 09:00" })).toEqual([]);
@@ -124,18 +125,22 @@ describe("G12 · 完成回流 + G4 观测", () => {
 
 describe("G3 · RBAC 与确认流", () => {
   it("角色往返 + 高风险审批 + 完成闭环", async () => {
-    const r = await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" });
+    // bootstrap：直接 SQL 授 superadmin（role/set 本身需要 admin session）
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user001','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
+    const adminTok = await mkSession("user001", "user001");
+    const r = await post("/api/role/set", { oim_user_id: "user003", role: "group_admin" }, adminTok);
     expect(r.ok).toBe(true);
-    expect((await get("/api/role/user001")).role).toBe("group_admin");
-    expect((await post("/api/role/set", { oim_user_id: "user001", role: "superadmin" })).ok).toBe(false);
-    // member 高风险 → pending
-    const n = await post("/api/notify/request", { group_id: "sg_001", text: "今晚 8 点发布", actor: "sim_user" });
+    expect((await get("/api/role/user003", adminTok)).role).toBe("group_admin");
+    expect((await post("/api/role/set", { oim_user_id: "user003", role: "superadmin" }, adminTok)).ok).toBe(false);
+    // member 高风险 → pending（actor 强制取会话身份，不信 body）
+    const memberTok = await mkSession("user002", "李四");
+    const n = await post("/api/notify/request", { group_id: "sg_001", text: "今晚 8 点发布" }, memberTok);
     expect(n.direct).toBe(false);
-    const pending = (await get("/api/approvals?status=pending")).approvals as Array<Record<string, unknown>>;
+    const pending = (await get("/api/approvals?status=pending", adminTok)).approvals as Array<Record<string, unknown>>;
     expect(pending.length).toBe(1);
     // admin 批复 → approved
     const aid = pending[0].id;
-    const d = await post(`/api/approvals/${aid}/decide`, { approved: true, decided_by: "imAdmin" });
+    const d = await post(`/api/approvals/${aid}/decide`, { approved: true }, adminTok);
     expect((d.approval as Record<string, unknown>).status).toBe("approved");
     // 识别 → 确认流（经新发送端点）
     makeFakeLlm([{ match: "我来写周报", intent: makeIntent({ is_task: true, confidence: "high",
@@ -144,7 +149,7 @@ describe("G3 · RBAC 与确认流", () => {
     const ai = await post("/api/messages/send", { text: "我来写周报",
       conv_id: "sg_g3", client_msg_id: "g3-cmid-1" }, token);
     const taskId = ((ai.ai as Record<string, unknown>).task as Record<string, unknown>).taskId as number;
-    expect((await post(`/api/tasks/${taskId}/confirm`, {})).ok).toBe(true);
+    expect((await post(`/api/tasks/${taskId}/confirm`, {}, token)).ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("confirmed");
   });
 });
@@ -162,7 +167,8 @@ describe("G13 · 质量统计口径（真实口径排除派生/测试流量）",
     await query("INSERT INTO audit(actor,action,detail,ts) VALUES('g13','ai_processed',$1,NOW())",
       [JSON.stringify({ msgId: "g13-2", action: "task_created", taskId: Number(mined!.id), latency_ms: 60000, source: "sdk_message" })]);
 
-    const rep = await get("/api/stats/quality?days=7");
+    const statsToken = await mkSession("user-g13", "G13用户");
+    const rep = await get("/api/stats/quality?days=7", statsToken);
     expect(rep.ok).toBe(true);
     // auditLog 必须写 ts（漏写 → 新行被统计窗口静默过滤，2026-09-03 实证）
     const { auditLog } = await import("../src/repos.js");
@@ -193,7 +199,7 @@ describe("G14 · 驳回原因选择器", () => {
     const ai = await post("/api/messages/send", { text: "我来交周报",
       conv_id: "sg_g14", client_msg_id: "g14-cmid-1" }, token);
     const taskId = ((ai.ai as Record<string, unknown>).task as Record<string, unknown>).taskId as number;
-    const r = await post(`/api/tasks/${taskId}/reject`, { reason: "时间不对" });
+    const r = await post(`/api/tasks/${taskId}/reject`, { reason: "时间不对" }, token);
     expect(r.ok).toBe(true);
     expect((await one("SELECT status FROM task WHERE id=$1", [taskId]))!.status).toBe("rejected");
     const aud = await one<{ detail: string }>(
@@ -214,17 +220,18 @@ describe("G15 · 任务状态变化补发 task_status SSE 事件", () => {
     const pendingId = await mkTask("G15待确认任务", "pending_confirmation");
     const confirmedId = await mkTask("G15已确认任务A", "confirmed");
     const confirmedId2 = await mkTask("G15已确认任务B", "confirmed");
+    const token = await mkSession("user001", "G15用户");
 
     const events: string[] = [];
     const { subscribe, unsubscribe } = await import("../src/sse.js");
     const sink = (line: string) => events.push(line);
     subscribe(sink);
     try {
-      const r1 = await post(`/api/tasks/${pendingId}/confirm`, {});
+      const r1 = await post(`/api/tasks/${pendingId}/confirm`, {}, token);
       expect(r1.ok).toBe(true);
-      const r2 = await post(`/api/tasks/${confirmedId}/reject`, { reason: "不需要建任务" });
+      const r2 = await post(`/api/tasks/${confirmedId}/reject`, { reason: "不需要建任务" }, token);
       expect(r2.ok).toBe(true);
-      const r3 = await request(`/api/tasks/${confirmedId2}`, "PATCH", { assignee: "李娜" });
+      const r3 = await request(`/api/tasks/${confirmedId2}`, "PATCH", { assignee: "李娜" }, token);
       expect(r3.ok).toBe(true);
 
       const statusEvents = events
@@ -271,7 +278,7 @@ describe("G16 术语接口鉴权", () => {
     const rDelUser002 = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user002);
     expect(rDelUser002.ok).toBe(false);
     expect(rDelUser002.error).toBe("forbidden");
-    await post("/api/role/set", { oim_user_id: "user001", role: "group_admin" });
+    await query("INSERT INTO role(oim_user_id, role) VALUES('user001','group_admin') ON CONFLICT (oim_user_id) DO UPDATE SET role='group_admin'");
     const rDelAdmin = await request(`/api/term/${enc("G16术语B")}`, "DELETE", undefined, user001);
     expect(rDelAdmin.ok).toBe(true);
   });
